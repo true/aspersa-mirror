@@ -1,0 +1,121 @@
+#!/bin/bash
+
+# ########################################################################
+# A script to summarize system information in a nice way.
+# Goals: work well on Linux; create a compact diff-able report that is
+# easy to paste into a wiki or email, and easy to scan and compare too.
+# ########################################################################
+
+# ########################################################################
+# Globals, functions
+# ########################################################################
+section () {
+   printf -vline "#_%-60s" "$1_"
+   line="${line// /#}"
+   printf "%s\n" "${line//_/ }"
+}
+
+name_val() {
+   printf "%12s | %s\n" "$1" "$2"
+}
+
+# Converts a value to units of power of 2
+# Usage: shorten $value 'variable_name'
+shorten() {
+   unit=k
+   size=1024
+	if [ $1 -ge 1099511627776 ] ; then
+		size=1099511627776
+		unit=T
+	elif [ $1 -ge 1073741824 ] ; then
+		size=1073741824
+		unit=G
+	elif [ $1 -ge 1048576 ] ; then
+		size=1048576
+      unit=M
+	fi
+   result=`echo "scale=2;$1/$size" | bc -l`
+   export "$2"="$result$unit"
+}
+
+# ########################################################################
+# Begin the script
+# ########################################################################
+section System
+
+name_val "Current date" "`date -u +'%F %T UTC'` (local TZ: `date +'%Z %z'`)"
+name_val "Hostname" `uname -n`
+name_val "Uptime" "`uptime | cut -dp -f2 | cut -c2-`"
+if cat /etc/*release >/dev/null 2>&1; then
+   name_val "Release" ""
+   cat /etc/*release | while read line; do
+      name_val "" "$line"
+   done
+else
+   name_val "Release" "nothing in /etc/*release"
+fi
+
+CPU_ARCH='32-bit'
+if grep -q ' lm ' /proc/cpuinfo; then
+   CPU_ARCH='64-bit'
+fi
+OS_ARCH='32-bit'
+if file -L /bin/sh | grep -q '64-bit'; then
+   OS_ARCH='64-bit'
+fi
+name_val "Architecture" "$CPU_ARCH CPU, $OS_ARCH OS"
+
+# ########################################################################
+# Processor
+# ########################################################################
+section Processor
+
+name_val "Count" `grep 'physical id' /proc/cpuinfo | sort -u | wc -l`
+name_val "Cores" `grep -c processor /proc/cpuinfo`
+name_val "Speed(s)" ""
+grep MHz /proc/cpuinfo | sort | uniq -c | while read line; do
+   count=$(echo $line | awk '{print $1}')
+   speed=$(echo $line | awk '{print $5}' | cut -d. -f1)
+   name_val "$count" "$speed MHz"
+done
+name_val "Model(s)" ""
+grep 'model name' /proc/cpuinfo | sort | uniq -c | while read line; do
+   count=$(echo $line | awk '{print $1}')
+   name_val $count "`echo $line | cut -d: -f 2- | cut -c2-`"
+done
+name_val "Cache(s)" ""
+grep 'cache size' /proc/cpuinfo | sort | uniq -c | while read line; do
+   count="`echo $line | awk '{print $1}'`"
+   name_val $count "`echo $line | cut -d: -f 2- | cut -c2-`"
+done
+
+# ########################################################################
+# Memory
+# ########################################################################
+section Memory
+
+val=`free -ob | grep Mem | awk '{print $2}'`
+shorten $val val
+name_val Total $val
+
+val=`free -ob | grep Mem | awk '{print $3}'`
+shorten $val val
+name_val Used $val
+
+val=`free -ob | grep Mem | awk '{print $4}'`
+shorten $val val
+name_val Free $val
+
+val=`free -ob | grep Mem | awk '{print $6}'`
+shorten $val val
+name_val Buffers $val
+
+val=`free -ob | grep Mem | awk '{print $7}'`
+shorten $val val
+name_val Cached $val
+
+# TODO: look at dmidecode for more RAM info.
+
+# ########################################################################
+# Disks, RAID, Filesystems
+# ########################################################################
