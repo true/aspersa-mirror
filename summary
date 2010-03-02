@@ -1,10 +1,28 @@
 #!/bin/bash
+# This program is part of Aspersa (http://code.google.com/p/aspersa/)
 
 # ########################################################################
 # A script to summarize system information in a nice way.
 # Goals: work well on Linux; create a compact diff-able report that is
 # easy to paste into a wiki or email, and easy to scan and compare too.
+#
+# Author: Baron Schwartz
 # ########################################################################
+
+# This file is used for storing working results so we don't call commands many
+# times (slow, plus gives inconsistent results).  It must not exist -- if it
+# did, someone would symlink it to /etc/passwd and then run this program as
+# root.
+for file in /tmp/aspersa /tmp/aspersa2; do
+   if [ -e "${file}" ]; then
+      echo "For security reasons, ${file} must not exist.";
+      exit 1;
+   fi
+   if ! touch "${file}"; then
+      echo "I can't make my temp file ${file}";
+      exit 1;
+   fi
+done
 
 # ########################################################################
 # Globals, functions
@@ -41,19 +59,29 @@ shorten() {
 # ########################################################################
 # Begin the script
 # ########################################################################
-section System
+section Aspersa_System_Summary_Report
 
 name_val "Current date" "`date -u +'%F %T UTC'` (local TZ: `date +'%Z %z'`)"
 name_val "Hostname" `uname -n`
 name_val "Uptime" "`uptime | cut -dp -f2 | cut -c2-`"
-if cat /etc/*release >/dev/null 2>&1; then
-   name_val "Release" ""
-   cat /etc/*release | while read line; do
-      name_val "" "$line"
-   done
-else
-   name_val "Release" "nothing in /etc/*release"
+
+# Try to find all sorts of different files that say what the release is.
+if [ -e /etc/fedora-release ]; then
+   release=`cat /etc/fedora-release`;
+elif [ -e /etc/redhat-release ]; then
+   release=`cat /etc/redhat-release`;
+elif [ -e /etc/system-release ]; then
+   release=`cat /etc/system-release`;
+elif [ -e /etc/debian_version ]; then
+   release="Debian-based; version $(cat /etc/debian_version)";
+elif ls /etc/*release 2>/dev/null; then
+   if grep -q DISTRIB_DESCRIPTION /etc/*release; then
+      release=$(grep DISTRIB_DESCRIPTION /etc/*release | head -n1);
+   else
+      release=$(cat /etc/*release | head -n1);
+   fi
 fi
+name_val Release "${release}"
 
 CPU_ARCH='32-bit'
 if grep -q ' lm ' /proc/cpuinfo; then
@@ -64,58 +92,117 @@ if file -L /bin/sh | grep -q '64-bit'; then
    OS_ARCH='64-bit'
 fi
 name_val "Architecture" "$CPU_ARCH CPU, $OS_ARCH OS"
+name_val Threading $(getconf GNU_LIBPTHREAD_VERSION)
+if [ -f /lib/libc.so.6 ]; then
+   name_val "Version" "$(/lib/libc.so.6 | grep 'GNU C L' | grep -o '[0-9][^,]*')"
+   name_val "Compiled by" "$(/lib/libc.so.6 | grep 'Compiled by' | cut -c13-)"
+fi
 
 # ########################################################################
 # Processor
 # ########################################################################
 section Processor
 
-name_val "Count" `grep 'physical id' /proc/cpuinfo | sort -u | wc -l`
-name_val "Cores" `grep -c processor /proc/cpuinfo`
-name_val "Speed(s)" ""
-grep MHz /proc/cpuinfo | sort | uniq -c | while read line; do
+cp /proc/cpuinfo /tmp/aspersa
+name_val "Count" `grep 'physical id' /tmp/aspersa | sort -u | wc -l`
+name_val "Cores" `grep -c processor /tmp/aspersa`
+
+# We have to avoid cmd|while loops, because they spawn a subshell.
+tempresult=""
+grep MHz /tmp/aspersa | sort | uniq -c > /tmp/aspersa2
+while read line; do
    count=$(echo $line | awk '{print $1}')
    speed=$(echo $line | awk '{print $5}' | cut -d. -f1)
-   name_val "$count" "$speed MHz"
-done
-name_val "Model(s)" ""
-grep 'model name' /proc/cpuinfo | sort | uniq -c | while read line; do
+   if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
+   tempresult="${tempresult}${count}x${speed} MHz"
+done < /tmp/aspersa2
+name_val "Speeds" "$tempresult"
+
+tempresult=""
+grep 'model name' /tmp/aspersa | sort | uniq -c > /tmp/aspersa2
+while read line; do
    count=$(echo $line | awk '{print $1}')
-   name_val $count "`echo $line | cut -d: -f 2- | cut -c2-`"
-done
-name_val "Cache(s)" ""
-grep 'cache size' /proc/cpuinfo | sort | uniq -c | while read line; do
+   if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
+   tempresult="${tempresult}${count}x`echo $line | cut -d: -f 2- | cut -c2-`"
+done < /tmp/aspersa2
+name_val "Models" "${tempresult}"
+
+tempresult=""
+grep 'cache size' /tmp/aspersa | sort | uniq -c > /tmp/aspersa2
+while read line; do
    count="`echo $line | awk '{print $1}'`"
-   name_val $count "`echo $line | cut -d: -f 2- | cut -c2-`"
-done
+   if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
+   tempresult="${tempresult}${count}x`echo $line | cut -d: -f 2- | cut -c2-`"
+done < /tmp/aspersa2
+name_val "Caches" "${tempresult}"
 
 # ########################################################################
 # Memory
 # ########################################################################
 section Memory
 
-val=`free -ob | grep Mem | awk '{print $2}'`
+free -b > /tmp/aspersa
+
+val=`grep Mem /tmp/aspersa | awk '{print $2}'`
 shorten $val val
 name_val Total $val
 
-val=`free -ob | grep Mem | awk '{print $3}'`
+val=`grep Mem /tmp/aspersa | awk '{print $3}'`
 shorten $val val
 name_val Used $val
 
-val=`free -ob | grep Mem | awk '{print $4}'`
+val=`grep Mem /tmp/aspersa | awk '{print $4}'`
 shorten $val val
 name_val Free $val
 
-val=`free -ob | grep Mem | awk '{print $6}'`
+val=`grep Mem /tmp/aspersa | awk '{print $6}'`
 shorten $val val
 name_val Buffers $val
 
-val=`free -ob | grep Mem | awk '{print $7}'`
+val=`grep Mem /tmp/aspersa | awk '{print $7}'`
 shorten $val val
 name_val Cached $val
 
-# TODO: look at dmidecode for more RAM info.
+if dmidecode > /tmp/aspersa 2>/dev/null; then
+   echo -n "" > /tmp/aspersa2
+   # From the sed one-liners at http://sed.sourceforge.net/sed1line.txt
+   # To print a paragraph containing a pattern.
+   sed -e '/./{H;$!d;}' -e 'x;/Memory Device\n/!d;' /tmp/aspersa \
+         | grep '\(Size\|Type\|Form.Factor\|Type.Detail\|Speed\):' \
+   | while read line; do
+      temp=$(echo "$line" | cut -d: -f2);
+      echo -n ";${temp}" >> /tmp/aspersa2
+      if echo "${line}" | grep -q Speed; then
+         echo "" >> /tmp/aspersa2
+      fi
+   done
+
+   cut -c3- /tmp/aspersa2 | sort | uniq -c | while read line; do
+      count="`echo $line | awk '{print $1}'`"
+      tempresult="${count}x`echo $line | cut -d: -f 2- | cut -c2-`"
+      name_val "Memory Chip" "${tempresult}"
+   done
+else
+   name_val "Memory Chip" "Can't execute dmidecode to get chip info."
+fi
 
 # ########################################################################
 # Disks, RAID, Filesystems
 # ########################################################################
+
+#Storage:
+#   No RAID controllers detected.
+#   LVM volume groups:   VG       #PV #LV #SN Attr   VSize  VFree
+#  vg_kanga   1   2   0 wz--n- 59.37G    0
+#   df: 
+#   Filesystem    Type    Size  Used Avail Use% Mounted on
+#   /dev/mapper/vg_kanga-lv_root
+#                 ext3     55G   17G   36G  32% /
+#   tmpfs        tmpfs    944M  260K  943M   1% /dev/shm
+#   /dev/sda2     ext4    194M   53M  131M  29% /boot
+
+# ########################################################################
+# All done.  Signal the end so it's explicit.
+# ########################################################################
+rm -f /tmp/aspersa*;
+section The_End
