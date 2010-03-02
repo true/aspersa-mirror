@@ -13,6 +13,8 @@ bt-aggregate - Aggregate and print GDB backtraces.
     -p $(pidof mysqld) > backtrace.txt
   bt-aggregate backtrace.txt
 
+For more compact output, set the AS_COMPACT environment variable.
+
 =head1 OPTIONS
 
 =over
@@ -59,9 +61,14 @@ while ( my $chunk = <> ) {
 foreach my $sig (
    reverse sort { $traces{$a}->{count} <=> $traces{$b}->{count} } keys %traces
 ) {
-   print $traces{$sig}->{count}, " threads with the following stack trace:\n";
-   # print "\t ", join(",", @{$traces{$trace}->{tids}}), "\n";
    my $trace = $traces{$sig}->{sample};
-   $trace =~ s/^/\t/gm;
-   print $trace, "\n\n";
+   if ( $ENV{AS_COMPACT} ) {
+      printf "%4d %s\n", $traces{$sig}->{count},
+         join(', ', map { "$_()" } $trace =~ m/ in (\S+) /g);
+   }
+   else {
+      printf "%4d threads with the following stack trace:\n", $traces{$sig}->{count};
+      $trace =~ s/^/\t/gm;
+      print $trace, "\n\n";
+   }
 }
