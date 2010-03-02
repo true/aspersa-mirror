@@ -1,4 +1,5 @@
 #!/bin/bash
+# This program is part of Aspersa (http://code.google.com/p/aspersa/)
 
 ################################################################################
 # mext2 - Tool to see columnized output of mysqladmin.  See "mext".  This is a
