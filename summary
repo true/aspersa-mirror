@@ -9,10 +9,9 @@
 # Author: Baron Schwartz
 # ########################################################################
 
-# This file is used for storing working results so we don't call commands many
-# times (slow, plus gives inconsistent results).  It must not exist -- if it
-# did, someone would symlink it to /etc/passwd and then run this program as
-# root.
+# The temp files are for storing working results so we don't call commands many
+# times (gives inconsistent results).  They must not exist -- if they did,
+# someone would symlink them to /etc/passwd and then run this program as root.
 for file in /tmp/aspersa /tmp/aspersa2; do
    if [ -e "${file}" ]; then
       echo "For security reasons, ${file} must not exist.";
@@ -27,18 +26,23 @@ done
 # ########################################################################
 # Globals, functions
 # ########################################################################
+
+# Print a space-padded string into $line.  Then translate spaces to hashes, and
+# underscores to spaces.  End result is a line of hashes with words at the
+# start.
 section () {
    printf -vline "#_%-60s" "$1_"
    line="${line// /#}"
    printf "%s\n" "${line//_/ }"
 }
 
+# Print a "name | value" line.
 name_val() {
    printf "%12s | %s\n" "$1" "$2"
 }
 
-# Converts a value to units of power of 2
-# Usage: shorten $value 'variable_name'
+# Converts a value to units of power of 2. Stores the result into a variable
+# with the name you specify.  Usage: shorten $value 'variable_name'
 shorten() {
    unit=k
    size=1024
@@ -52,7 +56,7 @@ shorten() {
 		size=1048576
       unit=M
 	fi
-   result=`echo "scale=2;$1/$size" | bc -l`
+   result=$(echo "$1 $size" | awk '{printf "%.2f", $1 / $2}')
    export "$2"="$result$unit"
 }
 
@@ -103,9 +107,33 @@ fi
 # ########################################################################
 section Processor
 
+# Physical processors are indicated by distinct 'physical id'.  Virtual CPUs are
+# indicated by paragraphs -- one per paragraph.  If physical*cores < virtual,
+# then hyperthreading is in use.  NOTE: We assume that all processors are
+# identical, i.e. that there are not some processors with dual cores and some
+# with quad cores.  The 'ht' flag in /proc/cpuinfo is NOT trustworthy.
 cp /proc/cpuinfo /tmp/aspersa
-name_val "Count" `grep 'physical id' /tmp/aspersa | sort -u | wc -l`
-name_val "Cores" `grep -c processor /tmp/aspersa`
+physical=$(grep 'physical id' /tmp/aspersa | sort -u | wc -l);
+virtual=$(grep -c ^processor /tmp/aspersa);
+
+# Older kernel won't have 'physical id'.
+if [ "${physical}" = "0" ]; then
+   physical=${virtual}
+fi
+
+# Older kernel won't have 'cpu cores', either.
+cores=$(grep 'cpu cores' /tmp/aspersa | head -n 1 | cut -d: -f2);
+if [ -z "${cores}" ]; then cores=0; fi
+
+# Test for HTT
+cores=$((${cores} * ${physical}));
+if [ ${cores} -gt 0 -a $cores -lt $virtual ]; then
+   htt=has
+else
+   htt=no
+fi
+
+name_val "Processors" "${physical} physical, ${cores} cores, ${virtual} virtual, ${htt} hyperthreading"
 
 # We have to avoid cmd|while loops, because they spawn a subshell.
 tempresult=""
@@ -148,8 +176,16 @@ shorten $val val
 name_val Total $val
 
 val=`grep Mem /tmp/aspersa | awk '{print $3}'`
+val2=$(grep Swap /tmp/aspersa | awk '{print $3}')
+val3=$(($val + $val2))
 shorten $val val
-name_val Used $val
+shorten $val2 val2
+shorten $val3 val3
+name_val Used "${val} physical + ${val2} swap = ${val3} virtual"
+
+val=$(ps -eo rss | awk '/[0-9]/{total += $1 * 1024} END {print total}')
+shorten $val val
+name_val Used "${val} used according to 'ps -eo rss'"
 
 val=`grep Mem /tmp/aspersa | awk '{print $4}'`
 shorten $val val
@@ -190,16 +226,68 @@ fi
 # Disks, RAID, Filesystems
 # ########################################################################
 
-#Storage:
-#   No RAID controllers detected.
-#   LVM volume groups:   VG       #PV #LV #SN Attr   VSize  VFree
-#  vg_kanga   1   2   0 wz--n- 59.37G    0
-#   df: 
-#   Filesystem    Type    Size  Used Avail Use% Mounted on
-#   /dev/mapper/vg_kanga-lv_root
-#                 ext3     55G   17G   36G  32% /
-#   tmpfs        tmpfs    944M  260K  943M   1% /dev/shm
-#   /dev/sda2     ext4    194M   53M  131M  29% /boot
+section "Disk_Space"
+
+df -hP | awk '{printf "%-30s%4s%7s%7s%5s %s\n", $1, $2, $3, $4, $5, $6}'
+
+section "Mounted_Filesystems"
+
+mount | awk '$5 !~ /proc|sysfs|devpts|binfmt|rpc|gvfs/ {
+   printf "%-30s%-18s%-8s%-8s\n", $1, $3, $5, $6}'
+
+section "LVM_Volumes"
+
+if lvs >/dev/null 2>&1; then
+   lvs
+else
+   echo "Cannot execute 'lvs'";
+fi
+
+section "RAID_Controller"
+
+dmesg | grep '^scsi[0-9]' > /tmp/aspersa
+if grep -qi ': .*megaraid' /tmp/aspersa; then
+   controller='LSI Logic MegaRAID'
+elif grep -q ': aacraid' /tmp/aspersa; then
+   controller='AACRAID'
+elif grep -q ': 3ware [0-9]* Storage Controller' /tmp/aspersa; then
+   controller='3Ware'
+fi
+
+if [ -z "${controller}" ]; then
+   echo "No RAID controller detected"
+else
+   name_val Controller "${controller}"
+fi
+
+# TODO: if the controller is megaraid but we can't execute the MegaSAS tool,
+# then try grepping dmesg for the following and outputting that:
+#grep -A20 'scanning.*logical drives' /tmp/aspersa | grep 'Vendor:\|Type:'
+
+# ########################################################################
+# Virtualization
+# ########################################################################
+section Virtualization
+
+lspci > /tmp/aspersa
+if grep -qi virtualbox /tmp/aspersa; then
+   virt=VirtualBox
+elif grep -qi vmware /tmp/aspersa; then
+   virt=VMWare
+elif [ -e /proc/user_beancounters ]; then
+   virt="OpenVZ/Virtuozzo"
+else
+   dmesg > /tmp/aspersa
+   if grep -qi vmware /tmp/aspersa; then
+      virt=VirtualBox
+   fi
+fi
+
+if [ -z "${virt}" ]; then
+   echo "No virtualization detected"
+else
+   name_val Technology "${virt}"
+fi
 
 # ########################################################################
 # All done.  Signal the end so it's explicit.
