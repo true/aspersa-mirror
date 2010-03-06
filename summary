@@ -9,23 +9,35 @@
 # Author: Baron Schwartz
 # ########################################################################
 
-# The temp files are for storing working results so we don't call commands many
-# times (gives inconsistent results).  They must not exist -- if they did,
-# someone would symlink them to /etc/passwd and then run this program as root.
-for file in /tmp/aspersa /tmp/aspersa2; do
-   if [ -e "${file}" ]; then
-      echo "For security reasons, ${file} must not exist.";
-      exit 1;
-   fi
-   if ! touch "${file}"; then
-      echo "I can't make my temp file ${file}";
-      exit 1;
-   fi
-done
-
 # ########################################################################
 # Globals, functions
 # ########################################################################
+
+# The temp files are for storing working results so we don't call commands many
+# times (gives inconsistent results).  They must not exist -- if they did,
+# someone would symlink them to /etc/passwd and then run this program as root.
+# Call this function with "check", "rm", or "touch" as an argument.
+temp_files() {
+   for file in /tmp/aspersa /tmp/aspersa2; do
+      case "$1" in
+      check)
+         if [ -e "${file}" ]; then
+            echo "For security reasons, ${file} must not exist.";
+            exit 1;
+         fi
+         ;;
+      touch)
+         if ! touch "${file}"; then
+            echo "I can't make my temp file ${file}";
+            exit 1;
+         fi
+         ;;
+      rm)
+         rm -f "${file}"
+         ;;
+      esac
+   done
+}
 
 # Print a space-padded string into $line.  Then translate spaces to hashes, and
 # underscores to spaces.  End result is a line of hashes with words at the
@@ -63,8 +75,13 @@ shorten() {
 # ########################################################################
 # Begin the script
 # ########################################################################
+temp_files "check"
+temp_files "touch"
 section Aspersa_System_Summary_Report
 
+# ########################################################################
+# General date, time, load, etc
+# ########################################################################
 name_val "Current date" "`date -u +'%F %T UTC'` (local TZ: `date +'%Z %z'`)"
 name_val "Hostname" `uname -n`
 name_val "Uptime" "`uptime | cut -dp -f2 | cut -c2-`"
@@ -292,5 +309,6 @@ fi
 # ########################################################################
 # All done.  Signal the end so it's explicit.
 # ########################################################################
-rm -f /tmp/aspersa*;
+temp_files "rm"
+temp_files "check"
 section The_End
