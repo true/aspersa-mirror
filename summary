@@ -113,10 +113,17 @@ if file -L /bin/sh | grep -q '64-bit'; then
    OS_ARCH='64-bit'
 fi
 name_val "Architecture" "$CPU_ARCH CPU, $OS_ARCH OS"
-name_val Threading $(getconf GNU_LIBPTHREAD_VERSION)
+
+# Threading library
+name_val Threading "$(getconf GNU_LIBPTHREAD_VERSION)"
 if [ -f /lib/libc.so.6 ]; then
-   name_val "Version" "$(/lib/libc.so.6 | grep 'GNU C L' | grep -o '[0-9][^,]*')"
    name_val "Compiled by" "$(/lib/libc.so.6 | grep 'Compiled by' | cut -c13-)"
+fi
+
+if [ -e /selinux ]; then
+   name_val "SELinux" "$(getenforce)";
+else
+   name_val "SELinux" "Does not exist";
 fi
 
 # ########################################################################
@@ -311,6 +318,14 @@ if [ -z "${virt}" ]; then
 else
    name_val Technology "${virt}"
 fi
+
+# ########################################################################
+# Processes, load, etc
+# ########################################################################
+section Top_Processes
+top -bn 1 | sed -e 's# *$##g' -e '/./{H;$!d;}' -e 'x;/PID/!d;' | head 
+
+# TODO vmstat 5 5 | grep '[0-9]'
 
 # ########################################################################
 # All done.  Signal the end so it's explicit.
