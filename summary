@@ -103,6 +103,7 @@ elif ls /etc/*release 2>/dev/null; then
    fi
 fi
 name_val Release "${release}"
+name_val Kernel "$(uname -r)"
 
 CPU_ARCH='32-bit'
 if grep -q ' lm ' /proc/cpuinfo; then
