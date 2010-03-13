@@ -224,6 +224,8 @@ val=`grep Mem /tmp/aspersa | awk '{print $7}'`
 shorten $val val
 name_val Cached $val
 
+name_val Swappiness "$(cat /proc/sys/vm/swappiness)"
+
 if dmidecode > /tmp/aspersa 2>/dev/null; then
    echo -n "" > /tmp/aspersa2
    # From the sed one-liners at http://sed.sourceforge.net/sed1line.txt
@@ -327,6 +329,8 @@ section Top_Processes
 top -bn 1 | sed -e 's# *$##g' -e '/./{H;$!d;}' -e 'x;/PID/!d;' | head 
 
 # TODO vmstat 5 5 | grep '[0-9]'
+# TODO:   /proc/sys/net/ipv4/ip_local_port_range
+# TODO:   /proc/sys/net/ipv4/tcp_fin_timeout
 
 # ########################################################################
 # All done.  Signal the end so it's explicit.
