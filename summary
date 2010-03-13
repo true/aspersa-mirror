@@ -224,7 +224,7 @@ val=`grep Mem /tmp/aspersa | awk '{print $7}'`
 shorten $val val
 name_val Cached $val
 
-name_val Swappiness "$(cat /proc/sys/vm/swappiness)"
+name_val Swappiness "$(sysctl vm.swappiness 2>&1)"
 
 if dmidecode > /tmp/aspersa 2>/dev/null; then
    echo -n "" > /tmp/aspersa2
@@ -331,6 +331,14 @@ top -bn 1 | sed -e 's# *$##g' -e '/./{H;$!d;}' -e 'x;/PID/!d;' | head
 # TODO vmstat 5 5 | grep '[0-9]'
 # TODO:   /proc/sys/net/ipv4/ip_local_port_range
 # TODO:   /proc/sys/net/ipv4/tcp_fin_timeout
+# netstat -antp | grep 3306 | awk '{print $5}' | cut -d: -f1 | sort | uniq -c |
+# sort -rn
+# ifconfig # //check for errors//
+# megarc -AdpBbuCmd -GetBbuStatus -aALL
+# /opt/MegaRAID/MegaCli/MegaCli64 -AdpAllInfo -aALL
+# /opt/MegaRAID/MegaCli/MegaCli64 -AdpBbuCmd -GetBbuStatus -aALL 
+# /usr/StorMan/arcconf GETCONFIG 1 LD 1
+
 
 # ########################################################################
 # All done.  Signal the end so it's explicit.
