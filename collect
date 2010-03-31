@@ -1,0 +1,66 @@
+#!/bin/bash
+# This program is part of Aspersa (http://code.google.com/p/aspersa/)
+
+# ########################################################################
+# A script to collect information from a server for some period of time.
+# Focused on gathering diagnostic data during a MySQL performance problem.
+#
+# Author: Baron Schwartz
+# ########################################################################
+
+# ########################################################################
+# Define configuration information: where do you want to put the data, and for
+# how long?
+# ########################################################################
+# Where to store the data
+DEST=~/collected
+# How long to work for, in seconds
+LEN=30
+
+# Make sure there's only one of me.
+(
+   flock -x -s 200
+
+   mkdir -p $DEST
+   d=$(date +%F-%T | tr :- _);
+   echo "Gathering info for $d"
+
+   # Getting a GDB stacktrace can be an intensive operation, so do this only if
+   # necessary.  If you want to, then just uncomment these lines.
+   # gdb -ex "set pagination 0" -ex "thread apply all bt" --batch -p $(pidof mysqld) >> $DEST/$d-stacktrace
+
+   # Get a sample of SHOW INNODB STATUS and SHOW FULL PROCESSLIST right away, so we
+   # can get these without interaction with the other commands we're about to run.
+   mysql -e 'SHOW INNODB STATUS\G'    >> $DEST/$d-innodbstatus1 2>&1 &
+   mysql -e 'SHOW FULL PROCESSLIST\G' >> $DEST/$d-processlist1  2>&1 &
+
+   # Next, start oprofile gathering data during the whole rest of this process.
+   opcontrol --start --no-vmlinux
+
+   # Grab a few general things first.  Background all of these so we can start them
+   # all up as quickly as possible.
+   ps -eaf                    >> $DEST/$d-ps 2>&1 &
+   top -bn1                   >> $DEST/$d-top 2>&1 &
+   vmstat 1 $LEN              >> $DEST/$d-vmstat 2>&1 &
+   iostat -dx 1 $LEN          >> $DEST/$d-iostat 2>&1 &
+   mysqladmin ext -i1 -c$LEN  >> $DEST/$d-mysqladmin 2>&1 &
+
+   # This loop is a bit redundant to the rest of the stuff, but in some cases we
+   # really need this data, like diskstats.  This loop also defines the time of the
+   # whole job.
+   for a in `seq 1 $LEN`; do
+      date >> $DEST/$d-diskstats; cat /proc/diskstats >> $DEST/$d-diskstats 2>&1;
+      date >> $DEST/$d-procstat;  cat /proc/stat      >> $DEST/$d-procstat 2>&1;
+      date >> $DEST/$d-df;        df -h               >> $DEST/$d-df 2>&1;
+      date >> $DEST/$d-lsof;      lsof | grep mysqld  >> $DEST/$d-lsof 2>&1;
+      sleep 1;
+   done
+
+   opcontrol --flush;
+   opcontrol --save=$d;
+   opcontrol --stop;
+
+   mysql -e 'SHOW INNODB STATUS\G'    >> $DEST/$d-innodbstatus2 2>&1 &
+   mysql -e 'SHOW FULL PROCESSLIST\G' >> $DEST/$d-processlist2  2>&1 &
+
+)200>/tmp/aspersa-collect-lockfile
