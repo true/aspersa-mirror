@@ -64,7 +64,17 @@ NUM=`expr $NUM - 3`;
 # spec and awk spec at the same time.
 for i in `eval echo {0..$NUM}`; do
    NEXTFILE=`expr $i + 1`;
+
+   # Sort each file and eliminate empty lines, so 'join' doesn't complain.
+   sort $FILE$i | grep . > $FILE$i.tmp;
+   mv $FILE$i.tmp $FILE$i;
+   sort $FILE${NEXTFILE} | grep . > $FILE${NEXTFILE}.tmp;
+   mv $FILE${NEXTFILE}.tmp $FILE${NEXTFILE};
+
+   # Join the files together.  This gets slow O(n^2) as we add more files, but
+   # this really shouldn't be performance critical.
    join $FILE$i $FILE${NEXTFILE} | grep . > $FILE;
+
    # Find the max length of the [numeric only] values in the file so we know how
    # wide to make the columns
    MAXLEN=`awk '{print $2}' $FILE${NEXTFILE} | grep -v '[^0-9]' | awk '{print length($1)}' | sort -rn | head -n1`
