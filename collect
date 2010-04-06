@@ -4,6 +4,7 @@
 # ########################################################################
 # A script to collect information from a server for some period of time.
 # Focused on gathering diagnostic data during a MySQL performance problem.
+# Typically executed from the 'stalk' program.
 #
 # Author: Baron Schwartz
 # ########################################################################

@@ -1,0 +1,44 @@
+#!/bin/bash
+# This program is part of Aspersa (http://code.google.com/p/aspersa/)
+
+# ########################################################################
+# A script to watch MySQL and run the 'collect' program when some condition
+# becomes true.  By default, it watches for a too-many-connections condition.
+# This is a good script to run in a screen session.  It's separate from the
+# 'collect' script because that lets you change 'collect' without stopping
+# and restarting this one.
+#
+# The name 'stalk' is because 'watch' is already taken, and 'stalk' is fun.
+#
+# Author: Baron Schwartz
+# ########################################################################
+
+# ########################################################################
+# Configuration settings.
+# ########################################################################
+# This is the max number of connections we want to tolerate.
+THREADS=100
+# This is the location of the 'collect' script.
+COLLECT="${HOME}/bin/collect";
+# This is the interval between checks
+SLEEP=30
+
+while true; do
+   date 
+   threads=""
+   threads=$(mysqladmin ext | grep Threads_connected | awk '{print $4}');
+   execute=no
+   if [ -z "${threads}" ]; then
+      execute="yes"
+   elif [ ${threads} -gt 100 ]; then
+      execute="yes"
+   fi
+   if [ "${execute}" = "yes" ]; then 
+      echo "Executing collection script"
+      ${COLLECT}
+      echo "sleeping a while to avoid DOS attack"
+      sleep 600 
+   else
+      sleep ${SLEEP}
+   fi
+done
