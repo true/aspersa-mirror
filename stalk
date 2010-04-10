@@ -29,7 +29,7 @@ while true; do
    threads=$(mysqladmin ext | grep Threads_connected | awk '{print $4}');
    execute=no
    if [ -z "${threads}" ]; then
-      execute="yes"
+      execute="yes" # Oops, couldn't connect, maybe max_connections problem.
    elif [ ${threads} -gt 100 ]; then
       execute="yes"
    fi
