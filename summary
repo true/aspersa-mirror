@@ -270,10 +270,10 @@ section "Mounted_Filesystems"
 mount | awk '$5 !~ /proc|sysfs|devpts|binfmt|rpc|gvfs/ {
    printf "%-30s%-18s%-8s%-8s\n", $1, $3, $5, $6}'
 
-section "Disk_Schedulers"
+section "Disk_Schedulers_And_Queue_Size"
 
 for disk in /sys/block/[h,s]d*; do
-   name_val "${disk}" $(cat ${disk}/queue/scheduler)
+   name_val "${disk}" "$(cat ${disk}/queue/scheduler | grep -o '\[.*\]') $(cat ${disk}/queue/nr_requests)"
 done
 
 section "LVM_Volumes"
