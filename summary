@@ -136,8 +136,10 @@ section Processor
 # indicated by paragraphs -- one per paragraph.  If physical*cores < virtual,
 # then hyperthreading is in use.  NOTE: We assume that all processors are
 # identical, i.e. that there are not some processors with dual cores and some
-# with quad cores.  The 'ht' flag in /proc/cpuinfo is NOT trustworthy.
-cp /proc/cpuinfo /tmp/aspersa
+# with quad cores.  The 'ht' flag in /proc/cpuinfo is NOT trustworthy.  We also
+# cannot 'cp' files from /proc, because they might be empty afterwards.  (I've
+# seen 'cp /proc/cpuinfo' create an empty file.)
+cat /proc/cpuinfo > /tmp/aspersa
 physical=$(grep 'physical id' /tmp/aspersa | sort -u | wc -l);
 virtual=$(grep -c ^processor /tmp/aspersa);
 
@@ -225,6 +227,8 @@ shorten $val val
 name_val Cached $val
 
 name_val Swappiness "$(sysctl vm.swappiness 2>&1)"
+name_val DirtyPolicy "$(sysctl vm.dirty_ratio 2>&1) $(sysctl vm.dirty_background_ratio 2>&1)"
+name_val DirtyStatus "$(sysctl vm.dirty_bytes 2>&1) $(sysctl vm.dirty_background_bytes 2>&1)"
 
 if dmidecode > /tmp/aspersa 2>/dev/null; then
    echo -n "" > /tmp/aspersa2
@@ -245,6 +249,10 @@ if dmidecode > /tmp/aspersa 2>/dev/null; then
       tempresult="${count}x`echo $line | cut -d: -f 2- | cut -c2-`"
       name_val "Memory Chip" "${tempresult}"
    done
+
+   # TODO: [root@kanga ~]# dmidecode -s system-product-name
+   # system-manufacturer Dell Inc.
+
 else
    name_val "Memory Chip" "Can't execute dmidecode to get chip info."
 fi
