@@ -122,7 +122,7 @@ if [ -f /lib/libc.so.6 ]; then
 fi
 
 if [ -e /selinux ]; then
-   name_val "SELinux" "$(getenforce)";
+   name_val "SELinux" "$(getenforce 2>&1)";
 else
    name_val "SELinux" "Does not exist";
 fi
