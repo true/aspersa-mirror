@@ -17,7 +17,7 @@
 # Configuration settings.
 # ########################################################################
 # This is the max number of connections we want to tolerate.
-THREADS=100
+THREADS=${1:-100}
 # This is the location of the 'collect' script.
 COLLECT="${HOME}/bin/collect";
 # This is the interval between checks
@@ -30,7 +30,7 @@ while true; do
    execute=no
    if [ -z "${threads}" ]; then
       execute="yes" # Oops, couldn't connect, maybe max_connections problem.
-   elif [ ${threads} -gt 100 ]; then
+   elif [ ${threads} -gt $THREADS ]; then
       execute="yes"
    fi
    if [ "${execute}" = "yes" ]; then 
