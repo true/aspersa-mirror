@@ -45,6 +45,7 @@ LEN=30
    vmstat 1 $LEN              >> $DEST/$d-vmstat 2>&1 &
    iostat -dx 1 $LEN          >> $DEST/$d-iostat 2>&1 &
    mysqladmin ext -i1 -c$LEN  >> $DEST/$d-mysqladmin 2>&1 &
+   mysqladmin_pid=$!
 
    # This loop is a bit redundant to the rest of the stuff, but in some cases we
    # really need this data, like diskstats.  This loop also defines the time of the
@@ -65,4 +66,7 @@ LEN=30
    mysql -e 'SHOW INNODB STATUS\G'    >> $DEST/$d-innodbstatus2 2>&1 &
    mysql -e 'SHOW FULL PROCESSLIST\G' >> $DEST/$d-processlist2  2>&1 &
 
+   # mysqladmin in 5.1 has a bunch of obnoxious bugs.  Among them, -c does not
+   # work, so it will continue forever unless we kill it.
+   kill $mysqladmin_pid;
 )200>/tmp/aspersa-collect-lockfile
