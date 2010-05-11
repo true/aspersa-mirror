@@ -252,6 +252,8 @@ if dmidecode > /tmp/aspersa 2>/dev/null; then
 
    # TODO: [root@kanga ~]# dmidecode -s system-product-name
    # system-manufacturer Dell Inc.
+   # Add info about software RAID
+   # collapse mounted & free space together
 
 else
    name_val "Memory Chip" "Can't execute dmidecode to get chip info."

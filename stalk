@@ -16,17 +16,20 @@
 # ########################################################################
 # Configuration settings.
 # ########################################################################
-# This is the max number of connections we want to tolerate.
+# This is the max number of connections we want to tolerate.  You can pass this
+# in as the first command-line option if you want.
 THREADS=${1:-100}
 # This is the location of the 'collect' script.
 COLLECT="${HOME}/bin/collect";
-# This is the interval between checks
-SLEEP=30
+# This is the interval between checks; pass it as the 2nd command-line option.
+SLEEP=${2:-30}
+# This is the thing to check for.  You can pass this as the third option.
+VARIABLE=${3:-Threads_connected}
 
 while true; do
    date 
    threads=""
-   threads=$(mysqladmin ext | grep Threads_connected | awk '{print $4}');
+   threads=$(mysqladmin ext | grep ${VARIABLE} | awk '{print $4}');
    execute=no
    if [ -z "${threads}" ]; then
       execute="yes" # Oops, couldn't connect, maybe max_connections problem.
