@@ -53,21 +53,30 @@ name_val() {
    printf "%12s | %s\n" "$1" "$2"
 }
 
+# Get the right-hand text from a line with a colon in the middle, such as the
+# output from /usr/StorMan/arcconf.  Parameters:
+# $1 = pattern to match in the line
+# $2 = file to search in
+# $3 = variable to export the result to.
+get_keyval () {
+   export "$3"=$(sed -n -e "/$1/{s#^.*: *##;s#  *#_#g;p}" "$2")
+}
+
 # Converts a value to units of power of 2. Stores the result into a variable
 # with the name you specify.  Usage: shorten $value 'variable_name'
 shorten() {
    unit=k
    size=1024
-	if [ $1 -ge 1099511627776 ] ; then
-		size=1099511627776
-		unit=T
-	elif [ $1 -ge 1073741824 ] ; then
-		size=1073741824
-		unit=G
-	elif [ $1 -ge 1048576 ] ; then
-		size=1048576
+   if [ $1 -ge 1099511627776 ] ; then
+      size=1099511627776
+      unit=T
+   elif [ $1 -ge 1073741824 ] ; then
+      size=1073741824
+      unit=G
+   elif [ $1 -ge 1048576 ] ; then
+      size=1048576
       unit=M
-	fi
+   fi
    result=$(echo "$1 $size" | awk '{printf "%.2f", $1 / $2}')
    export "$2"="$result$unit"
 }
@@ -162,10 +171,11 @@ fi
 
 name_val "Processors" "${physical} physical, ${cores} cores, ${virtual} virtual, ${htt} hyperthreading"
 
-# We have to avoid cmd|while loops, because they spawn a subshell.
+# We have to avoid cmd|while loops, because they spawn a subshell.  But we can
+# do a while...done<file loop OK.
 tempresult=""
 grep MHz /tmp/aspersa | sort | uniq -c > /tmp/aspersa2
-while read line; do
+while read line; do # See the end of the loop, we are reading in there.
    count=$(echo $line | awk '{print $1}')
    speed=$(echo $line | awk '{print $5}' | cut -d. -f1)
    if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
@@ -263,14 +273,15 @@ fi
 # Disks, RAID, Filesystems
 # ########################################################################
 
-section "Disk_Space"
-
-df -hP | awk '{printf "%-30s%4s%7s%7s%5s %s\n", $1, $2, $3, $4, $5, $6}'
-
 section "Mounted_Filesystems"
 
-mount | awk '$5 !~ /proc|sysfs|devpts|binfmt|rpc|gvfs/ {
-   printf "%-30s%-18s%-8s%-8s\n", $1, $3, $5, $6}'
+echo "Filesystem                    Size   Used  Avail Use% Mountpoint";
+mount > /tmp/aspersa
+df -hP | grep -v Filesystem | while read line; do
+   fs=$(echo "${line}" | awk '{print $1}');
+   opts=$(grep "${fs}\>" /tmp/aspersa | awk '{print $NF}');
+   echo "${line} ${opts}" | awk '{printf "%-30s%4s%7s%7s%5s %s %s\n", $1, $2, $3, $4, $5, $6, $7}'
+done
 
 section "Disk_Schedulers_And_Queue_Size"
 
@@ -301,6 +312,80 @@ if [ -z "${controller}" ]; then
    echo "No RAID controller detected"
 else
    name_val Controller "${controller}"
+   
+   if [ "${controller}" = "AACRAID" ]; then
+      if /usr/StorMan/arcconf getconfig 1 > /tmp/aspersa; then
+         tempresult=$(grep 'Controller Model' /tmp/aspersa | cut -d: -f2)
+         tempresult="${tempresult},$(grep 'Channel description' /tmp/aspersa | cut -d: -f2)"
+         tempresult="${tempresult},$(grep 'Installed memory' /tmp/aspersa | cut -d: -f2)"
+         tempresult="${tempresult},$(grep 'Controller Status' /tmp/aspersa | cut -d: -f2)"
+         name_val Model "${tempresult}"
+
+         grep -A5 'Controller Battery Info' /tmp/aspersa > /tmp/aspersa2
+         tempresult=$(grep 'Capacity remaining' /tmp/aspersa2 | cut -d: -f2)
+         tempresult="${tempresult},$(grep 'Status' /tmp/aspersa2 | cut -d: -f2)"
+         name_val Battery "${tempresult}"
+
+         for dev in $(grep 'Logical device number' /tmp/aspersa | awk '{print $4}'); do
+            # Print the logical device's info to /tmp/aspersa2
+            sed -n -e "/Logical device number ${dev}/,/^$\|^Logical device number/p" /tmp/aspersa > /tmp/aspersa2
+            get_keyval "Logical device name" "/tmp/aspersa2" "tempresult"
+       name_val "Log'l Dev #${dev}" "Name:${tempresult}"
+            get_keyval "Size" "/tmp/aspersa2" "tempresult"
+            device="Size=${tempresult}"
+            get_keyval "RAID level" "/tmp/aspersa2" "tempresult"
+            device="${device}, RAID=${tempresult}"
+            get_keyval "Stripe-unit" "/tmp/aspersa2" "tempresult"
+            device="${device}, Stripe=${tempresult}"
+            get_keyval "Status of" "/tmp/aspersa2" "tempresult"
+            device="${device}, Status=${tempresult}"
+            name_val "" "${device//_/ }"
+            get_keyval "Write-cache mode" "/tmp/aspersa2" "tempresult"
+            name_val "" "Write Cache Mode ${tempresult//_/ }"
+            tempresult=$(grep -c 'Group [0-9]*, Segment' /tmp/aspersa2)
+            name_val "" "Segments/Disks ${tempresult}"
+         done
+
+         # Get the info on physical devices.  Print the whole paragraph to
+         # /tmp/aspersa2 and then read that in to examine it.
+         tempresult=""
+         sed -n -e "/Physical Device information/,/^$/p" /tmp/aspersa \
+            | grep 'Device is a' | cut -b22- | tr ' ' _ | sort \
+            | uniq -c > /tmp/aspersa2
+         while read line; do
+            count=$(echo $line | awk '{print $1}')
+            device="$(echo $line | awk '{print $2}')"
+            if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
+            tempresult="${tempresult}${count}x${device}"
+         done < /tmp/aspersa2
+         name_val "Phys Devs #${dev}" "${tempresult//_/ }"
+
+         tempresult=""
+         sed -n -e "/Physical Device information/,/^$/p" /tmp/aspersa \
+            | grep 'Transfer Speed' | cut -b47- | tr ' ' _ | sort \
+            | uniq -c > /tmp/aspersa2
+         while read line; do
+            count=$(echo $line | awk '{print $1}')
+            device="$(echo $line | awk '{print $2}')"
+            if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
+            tempresult="${tempresult}${count}x${device}"
+         done < /tmp/aspersa2
+         name_val "" "XFer Spds: ${tempresult//_/ }"
+
+         tempresult=""
+         sed -n -e "/Physical Device information/,/^$/p" /tmp/aspersa \
+            | grep 'Size' | cut -b47- | tr ' ' _ | sort \
+            | uniq -c > /tmp/aspersa2
+         while read line; do
+            count=$(echo $line | awk '{print $1}')
+            device="$(echo $line | awk '{print $2}')"
+            if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
+            tempresult="${tempresult}${count}x${device}"
+         done < /tmp/aspersa2
+         name_val "" "Dev Sizes: ${tempresult//_/ }"
+
+      fi
+   fi
 fi
 
 # TODO: if the controller is megaraid but we can't execute the MegaSAS tool,
