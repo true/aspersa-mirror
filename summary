@@ -275,12 +275,14 @@ fi
 
 section "Mounted_Filesystems"
 
-echo "Filesystem                    Size   Used  Avail Use% Mountpoint";
+echo "Filesystem                    Size   Used  Avail Use% Type/Opts Mountpoint";
 mount > /tmp/aspersa
 df -hP | grep -v Filesystem | while read line; do
-   fs=$(echo "${line}" | awk '{print $1}');
-   opts=$(grep "${fs}\>" /tmp/aspersa | awk '{print $NF}');
-   echo "${line} ${opts}" | awk '{printf "%-30s%4s%7s%7s%5s %s %s\n", $1, $2, $3, $4, $5, $6, $7}'
+   dev=$(echo "${line}" | awk '{print $1}');
+   fs=$(grep "${dev}\>" /tmp/aspersa | awk '{print $(NF-1)}');
+   opts=$(grep "${dev}\>" /tmp/aspersa | awk '{print $NF}');
+   fs="${fs}${opts}"
+   echo "${line} ${fs}" | awk '{printf "%-30s%4s%7s%7s%5s %-9s %s\n", $1, $2, $3, $4, $5, $7, $6}'
 done
 
 section "Disk_Schedulers_And_Queue_Size"
