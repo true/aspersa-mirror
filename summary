@@ -305,6 +305,24 @@ parse_arcconf () {
 }
 
 # ##############################################################################
+# Parse the output of MegaCli64 -AdpAllInfo -aALL from /tmp/aspersa.
+# ##############################################################################
+parse_lsi_megaraid_adapter_info () {
+   name=$(awk -F: '/Product Name/{print substr($2, 2)}' /tmp/aspersa);
+   int=$(awk '/Host Interface/{print $4}' /tmp/aspersa);
+   prt=$(awk '/Number of Backend Port/{print $5}' /tmp/aspersa);
+   bbu=$(awk '/^BBU             :/{print $3}' /tmp/aspersa);
+   mem=$(awk '/Memory Size/{print $4}' /tmp/aspersa);
+   vdr=$(awk '/Virtual Drives/{print $4}' /tmp/aspersa);
+   dvd=$(awk '/Degraded/{print $3}' /tmp/aspersa);
+   phy=$(awk '/^  Disks/{print $3}' /tmp/aspersa);
+   crd=$(awk '/Critical Disks/{print $4}' /tmp/aspersa);
+   fad=$(awk '/Failed Disks/{print $4}' /tmp/aspersa);
+   name_val Model "${name}, ${int} interface, ${prt} ports"
+   name_val Cache "${mem} Memory, BBU ${bbu}"
+}
+
+# ##############################################################################
 # The main() function is called at the end of the script.  This makes it
 # testable.  Major bits of parsing are separated into functions for testability.
 # As a general rule, we cannot 'cp' files from /proc, because they might be
@@ -428,6 +446,12 @@ main () {
    if [ "${controller}" = "AACRAID" ]; then
       if /usr/StorMan/arcconf getconfig 1 > /tmp/aspersa; then
          parse_arcconf
+      fi
+   elif [ "${controller}" = "LSI Logic MegaRAID" ]; then
+      if [ -x /opt/MegaRAID/MegaCli/MegaCli64 ]; then
+         if /opt/MegaRAID/MegaCli/MegaCli64 -AdpAllInfo -aALL > /tmp/aspersa; then
+            parse_lsi_megaraid_adapter_info
+         fi
       fi
    fi
 
