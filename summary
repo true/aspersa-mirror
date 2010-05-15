@@ -201,8 +201,107 @@ parse_dmidecode_mem_devices () {
 # /tmp/aspersa.
 # ##############################################################################
 parse_filesystems () {
-   echo "Filesystem                    Size Used Type  Opts          Mountpoint";
-   awk '{printf "%-30s%4s%5s %-5s %-13s %s\n", $1, $2, $5, $10, $11, $6}' /tmp/aspersa
+   echo "  Filesystem                    Size Used Type  Opts          Mountpoint";
+   awk '{printf "  %-30s%4s%5s %-5s %-13s %s\n", $1, $2, $5, $10, $11, $6}' /tmp/aspersa
+}
+
+# ##############################################################################
+# Parse the output of arcconf, which should be stored in /tmp/aspersa
+# ##############################################################################
+parse_arcconf () {
+   model=$(awk -F: '/Controller Model/{print $2}' /tmp/aspersa)
+   chan="$(awk -F: '/Channel description/{print $2}' /tmp/aspersa)"
+   cache="$(awk -F: '/Installed memory/{print $2}' /tmp/aspersa)"
+   status="$(awk -F: '/Controller Status/{print $2}' /tmp/aspersa)"
+   name_val Specs "${model/ /},${chan},${cache} cache,${status}"
+
+   battery=$(grep -A5 'Controller Battery Info' /tmp/aspersa \
+      | awk '/Capacity remaining/ {c=$4}
+             /Status/             {s=$3}
+             /Time remaining/     {t=sprintf("%dd%dh%dm", $7, $9, $11)}
+             END                  {printf("%d%%, %s remaining, %s", c, t, s)}')
+   name_val Battery "${battery}"
+
+   # ###########################################################################
+   # Logical devices
+   # ###########################################################################
+   echo
+   echo "  LogicalDev Size      RAID Disks Stripe Status  Cache"
+   echo "  ========== ========= ==== ===== ====== ======= ======="
+   for dev in $(awk '/Logical device number/{print $4}' /tmp/aspersa); do
+      sed -n -e "/^Logical device .* ${dev}$/,/^$\|^Logical device number/p" \
+         /tmp/aspersa \
+      | awk '
+         /Logical device name/               {d=$5}
+         /Size/                              {z=$3 " " $4}
+         /RAID level/                        {r=$4}
+         /Group [0-9]/                       {g++}
+         /Stripe-unit size/                  {p=$4 " " $5}
+         /Status of logical/                 {s=$6}
+         /Write-cache mode.*Ena.*write-back/ {c="On (WB)"}
+         /Write-cache mode.*Ena.*write-thro/ {c="On (WT)"}
+         /Write-cache mode.*Disabled/        {c="Off"}
+         END {
+            printf("  %-10s %-9s %4d %5d %-6s %-7s %-7s\n",
+               d, z, r, g, p, s, c);
+         }'
+   done
+
+   # ###########################################################################
+   # Physical devices
+   # ###########################################################################
+   echo
+   echo "  PhysiclDev State   Speed         Vendor  Model        Size        Cache"
+   echo "  ========== ======= ============= ======= ============ =========== ======="
+
+   # Find the paragraph with physical devices, tabularize with assoc arrays.
+   tempresult=""
+   sed -n -e '/Physical Device information/,/^$/p' /tmp/aspersa \
+      | awk -F: '
+         /Device #[0-9]/ {
+            device=substr($0, index($0, "#"));
+            devicenames[device]=device;
+         }
+         /Device is a/ {
+            devices[device ",isa"] = substr($0, index($0, "is a") + 5);
+         }
+         /State/ {
+            devices[device ",state"] = substr($2, 2);
+         }
+         /Transfer Speed/ {
+            devices[device ",speed"] = substr($2, 2);
+         }
+         /Vendor/ {
+            devices[device ",vendor"] = substr($2, 2);
+         }
+         /Model/ {
+            devices[device ",model"] = substr($2, 2);
+         }
+         /Size/ {
+            devices[device ",size"] = substr($2, 2);
+         }
+         /Write Cache/ {
+            if ( $2 ~ /Enabled .write-back./ )
+               devices[device ",cache"] = "On (WB)";
+            else
+               if ( $2 ~ /Enabled .write-th/ )
+                  devices[device ",cache"] = "On (WT)";
+               else
+                  devices[device ",cache"] = "Off";
+         }
+         END {
+            for ( device in devicenames ) {
+               printf("  %-10s %-7s %-13s %-7s %-12s %-11s %-7s\n",
+                  devices[device ",isa"],
+                  devices[device ",state"],
+                  devices[device ",speed"],
+                  devices[device ",vendor"],
+                  devices[device ",model"],
+                  devices[device ",size"],
+                  devices[device ",cache"]);
+            }
+         }'
+
 }
 
 # ##############################################################################
@@ -263,22 +362,16 @@ main () {
       name_val "Compiled by" "$(/lib/libc.so.6 | grep 'Compiled by' | cut -c13-)"
    fi
 
-   if [ -e /selinux ]; then
-      name_val "SELinux" "$(getenforce 2>&1)";
-   else
-      name_val "SELinux" "Does not exist";
-   fi
+   getenforce="$(getenforce 2>&1)";
+   name_val "SELinux" "${getenforce:-Does not exist}";
 
    # ########################################################################
-   # Processor/CPU section
+   # Processor/CPU, Memory, Swappiness, dmidecode
    # ########################################################################
    section Processor
    cat /proc/cpuinfo > /tmp/aspersa
    parse_proc_cpuinfo
 
-   # ########################################################################
-   # Memory section
-   # ########################################################################
    section Memory
    free -b > /tmp/aspersa
    parse_free_minus_b
@@ -297,10 +390,10 @@ main () {
       parse_dmidecode_mem_devices
    fi
 
-   # TODO: Add info about software RAID
    # ########################################################################
    # Disks, RAID, Filesystems
    # ########################################################################
+   # TODO: Add info about software RAID
    section "Mounted_Filesystems"
    join <(df -hP|sort) <(mount|sort) > /tmp/aspersa
    parse_filesystems
@@ -308,19 +401,20 @@ main () {
    section "Disk_Schedulers_And_Queue_Size"
 
    for disk in /sys/block/[h,s]d*; do
-      name_val "${disk}" "$(cat ${disk}/queue/scheduler | grep -o '\[.*\]') $(cat ${disk}/queue/nr_requests)"
+      name_val "$(basename ${disk})" "$(cat ${disk}/queue/scheduler | grep -o '\[.*\]') $(cat ${disk}/queue/nr_requests)"
    done
 
    section "LVM_Volumes"
 
-   if lvs >/dev/null 2>&1; then
-      lvs
+   if which lvs >/dev/null 2>&1 && test -x "$(which lvs)"; then
+      lvs 2>&1
    else
       echo "Cannot execute 'lvs'";
    fi
 
    section "RAID_Controller"
 
+   # TODO: look for /var/log/dmesg first.
    dmesg | grep '^scsi[0-9]' > /tmp/aspersa
    if grep -qi ': .*megaraid' /tmp/aspersa; then
       controller='LSI Logic MegaRAID'
@@ -329,84 +423,11 @@ main () {
    elif grep -q ': 3ware [0-9]* Storage Controller' /tmp/aspersa; then
       controller='3Ware'
    fi
+   name_val Controller "${controller:-No RAID controller detected}"
 
-   if [ -z "${controller}" ]; then
-      echo "No RAID controller detected"
-   else
-      name_val Controller "${controller}"
-
-      if [ "${controller}" = "AACRAID" ]; then
-         if /usr/StorMan/arcconf getconfig 1 > /tmp/aspersa; then
-            tempresult=$(grep 'Controller Model' /tmp/aspersa | cut -d: -f2)
-            tempresult="${tempresult},$(grep 'Channel description' /tmp/aspersa | cut -d: -f2)"
-            tempresult="${tempresult},$(grep 'Installed memory' /tmp/aspersa | cut -d: -f2)"
-            tempresult="${tempresult},$(grep 'Controller Status' /tmp/aspersa | cut -d: -f2)"
-            name_val Model "${tempresult}"
-
-            grep -A5 'Controller Battery Info' /tmp/aspersa > /tmp/aspersa2
-            tempresult=$(grep 'Capacity remaining' /tmp/aspersa2 | cut -d: -f2)
-            tempresult="${tempresult},$(grep 'Status' /tmp/aspersa2 | cut -d: -f2)"
-            name_val Battery "${tempresult}"
-
-            for dev in $(grep 'Logical device number' /tmp/aspersa | awk '{print $4}'); do
-               # Print the logical device's info to /tmp/aspersa2
-               sed -n -e "/Logical device number ${dev}/,/^$\|^Logical device number/p" /tmp/aspersa > /tmp/aspersa2
-               get_keyval "Logical device name" "/tmp/aspersa2" "tempresult"
-          name_val "Log'l Dev #${dev}" "Name:${tempresult}"
-               get_keyval "Size" "/tmp/aspersa2" "tempresult"
-               device="Size=${tempresult}"
-               get_keyval "RAID level" "/tmp/aspersa2" "tempresult"
-               device="${device}, RAID=${tempresult}"
-               get_keyval "Stripe-unit" "/tmp/aspersa2" "tempresult"
-               device="${device}, Stripe=${tempresult}"
-               get_keyval "Status of" "/tmp/aspersa2" "tempresult"
-               device="${device}, Status=${tempresult}"
-               name_val "" "${device//_/ }"
-               get_keyval "Write-cache mode" "/tmp/aspersa2" "tempresult"
-               name_val "" "Write Cache Mode ${tempresult//_/ }"
-               tempresult=$(grep -c 'Group [0-9]*, Segment' /tmp/aspersa2)
-               name_val "" "Segments/Disks ${tempresult}"
-            done
-
-            # Get the info on physical devices.  Print the whole paragraph to
-            # /tmp/aspersa2 and then read that in to examine it.
-            tempresult=""
-            sed -n -e "/Physical Device information/,/^$/p" /tmp/aspersa \
-               | grep 'Device is a' | cut -b22- | tr ' ' _ | sort \
-               | uniq -c > /tmp/aspersa2
-            while read line; do
-               count=$(echo $line | awk '{print $1}')
-               device="$(echo $line | awk '{print $2}')"
-               if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
-               tempresult="${tempresult}${count}x${device}"
-            done < /tmp/aspersa2
-            name_val "Phys Devs #${dev}" "${tempresult//_/ }"
-
-            tempresult=""
-            sed -n -e "/Physical Device information/,/^$/p" /tmp/aspersa \
-               | grep 'Transfer Speed' | cut -b47- | tr ' ' _ | sort \
-               | uniq -c > /tmp/aspersa2
-            while read line; do
-               count=$(echo $line | awk '{print $1}')
-               device="$(echo $line | awk '{print $2}')"
-               if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
-               tempresult="${tempresult}${count}x${device}"
-            done < /tmp/aspersa2
-            name_val "" "XFer Spds: ${tempresult//_/ }"
-
-            tempresult=""
-            sed -n -e "/Physical Device information/,/^$/p" /tmp/aspersa \
-               | grep 'Size' | cut -b47- | tr ' ' _ | sort \
-               | uniq -c > /tmp/aspersa2
-            while read line; do
-               count=$(echo $line | awk '{print $1}')
-               device="$(echo $line | awk '{print $2}')"
-               if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
-               tempresult="${tempresult}${count}x${device}"
-            done < /tmp/aspersa2
-            name_val "" "Dev Sizes: ${tempresult//_/ }"
-
-         fi
+   if [ "${controller}" = "AACRAID" ]; then
+      if /usr/StorMan/arcconf getconfig 1 > /tmp/aspersa; then
+         parse_arcconf
       fi
    fi
 
@@ -432,12 +453,7 @@ main () {
          virt=VirtualBox
       fi
    fi
-
-   if [ -z "${virt}" ]; then
-      echo "No virtualization detected"
-   else
-      name_val Technology "${virt}"
-   fi
+   name_val Technology "${virt:-No virtualization detected}"
 
    # ########################################################################
    # Processes, load, etc
@@ -454,8 +470,6 @@ main () {
    # megarc -AdpBbuCmd -GetBbuStatus -aALL
    # /opt/MegaRAID/MegaCli/MegaCli64 -AdpAllInfo -aALL
    # /opt/MegaRAID/MegaCli/MegaCli64 -AdpBbuCmd -GetBbuStatus -aALL 
-   # /usr/StorMan/arcconf GETCONFIG 1 LD 1
-
 
    # ########################################################################
    # All done.  Signal the end so it's explicit.
@@ -466,5 +480,5 @@ main () {
 }
 
 # Execute the program if it was not included from another file.  This makes it
-# possible to include and thus test.
+# possible to include without executing, and thus test.
 if [ $(basename "$0") = "summary" ]; then main $*; fi
