@@ -11,3 +11,4 @@ for f in samples/proc_cpuinfo_*.txt; do
       echo "not OK"
    fi
 done
+rm /tmp/aspersa

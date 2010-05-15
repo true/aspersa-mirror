@@ -90,7 +90,7 @@ shorten() {
 # ##############################################################################
 group_concat () {
    export "${2}"="$(sed -e '{H; $!d}' -e 'x' -e 's/\n[[:space:]]*\([[:digit:]]*\)[[:space:]]*/, \1x/g' -e 's/[[:space:]][[:space:]]*/ /g' -e 's/, //' ${1})"
-   # In words: save the paragraph into the hold space,
+   # In words: save the whole file into the hold space,
    # {H; $!d}
    # Swap it back into the pattern space,
    # x
@@ -112,7 +112,7 @@ group_concat () {
 # ##############################################################################
 
 # ##############################################################################
-# Parse Linux's /proc/cpuinfo.
+# Parse Linux's /proc/cpuinfo, which should be stored in /tmp/aspersa.
 # ##############################################################################
 parse_proc_cpuinfo () {
    # Physical processors are indicated by distinct 'physical id'.  Virtual CPUs
@@ -151,6 +151,61 @@ parse_proc_cpuinfo () {
 }
 
 # ##############################################################################
+# Parse the output of 'free -b', which should be stored in /tmp/aspersa.
+# ##############################################################################
+parse_free_minus_b () {
+   shorten "$(awk '/Mem/{print $2}' /tmp/aspersa)" total
+   name_val Total ${total}
+
+   physical=$(awk '/Mem/{print $3}' /tmp/aspersa);
+   swap=$(awk '/Swap/{print $3}' /tmp/aspersa);
+   virtual=$(($physical + $swap))
+
+   free=$(awk '/Mem/{print $4}' /tmp/aspersa);
+   shorten ${free} free
+   name_val Free ${free}
+
+   shorten ${physical} physical
+   shorten ${swap} swap
+   shorten ${virtual} virtual
+   name_val Used "${physical} physical + ${swap} swap = ${virtual} virtual"
+
+   buffers=$(awk '/Mem/{print $6}' /tmp/aspersa);
+   shorten ${buffers} buffers
+   name_val Buffers ${buffers}
+
+   cached=$(awk '/Mem/{print $7}' /tmp/aspersa);
+   shorten ${cached} cached
+   name_val Caches ${cached}
+}
+
+# ##############################################################################
+# Parse the output of 'dmidecode', which should be stored in /tmp/aspersa.
+# ##############################################################################
+parse_dmidecode_mem_devices () {
+   name_val DIMMs "    Size    Speed Form Factor Type       Type Detail"
+   name_val ""    "======== ======== =========== ========== ==========="
+   # Print paragraphs containing 'Memory Device\n', extract the desired bits,
+   # concatenate them into one long line, then format as a table.
+   sed    -e '/./{H;$!d;}' \
+          -e 'x;/Memory Device\n/!d;' \
+          -e 's/: /:/g' \
+       /tmp/aspersa \
+       | awk -F: '/Size|Type|Form.Factor|Type.Detail/{printf("|%s", $2)}/Speed/{print "|" $2}' \
+       | sort \
+       | awk -F'|' '{printf("%23s %8s %-11s %-10s %8s\n", $2, $6, $3, $4, $5);}'
+}
+
+# ##############################################################################
+# Parse the joined output of 'mount' and 'df -hP', which should be stored in
+# /tmp/aspersa.
+# ##############################################################################
+parse_filesystems () {
+   echo "Filesystem                    Size Used Type  Opts          Mountpoint";
+   awk '{printf "%-30s%4s%5s %-5s %-13s %s\n", $1, $2, $5, $10, $11, $6}' /tmp/aspersa
+}
+
+# ##############################################################################
 # The main() function is called at the end of the script.  This makes it
 # testable.  Major bits of parsing are separated into functions for testability.
 # As a general rule, we cannot 'cp' files from /proc, because they might be
@@ -168,6 +223,10 @@ main () {
    name_val "Current date" "`date -u +'%F %T UTC'` (local TZ: `date +'%Z %z'`)"
    name_val "Hostname" `uname -n`
    name_val "Uptime" "`uptime | cut -dp -f2 | cut -c2-`"
+   system=$(dmidecode -s system-product-name 2>/dev/null);
+   if [ "${system}" ]; then
+      name_val "System" "${system}";
+   fi
 
    # Try to find all sorts of different files that say what the release is.
    if [ -e /etc/fedora-release ]; then
@@ -218,88 +277,33 @@ main () {
    parse_proc_cpuinfo
 
    # ########################################################################
-   # Memory
+   # Memory section
    # ########################################################################
    section Memory
-
    free -b > /tmp/aspersa
+   parse_free_minus_b
 
-   val=`grep Mem /tmp/aspersa | awk '{print $2}'`
-   shorten $val val
-   name_val Total $val
-
-   val=`grep Mem /tmp/aspersa | awk '{print $3}'`
-   val2=$(grep Swap /tmp/aspersa | awk '{print $3}')
-   val3=$(($val + $val2))
-   shorten $val val
-   shorten $val2 val2
-   shorten $val3 val3
-   name_val Used "${val} physical + ${val2} swap = ${val3} virtual"
-
-   val=$(ps -eo rss | awk '/[0-9]/{total += $1 * 1024} END {print total}')
-   shorten $val val
-   name_val Used "${val} used according to 'ps -eo rss'"
-
-   val=`grep Mem /tmp/aspersa | awk '{print $4}'`
-   shorten $val val
-   name_val Free $val
-
-   val=`grep Mem /tmp/aspersa | awk '{print $6}'`
-   shorten $val val
-   name_val Buffers $val
-
-   val=`grep Mem /tmp/aspersa | awk '{print $7}'`
-   shorten $val val
-   name_val Cached $val
+   rss=$(ps -eo rss | awk '/[0-9]/{total += $1 * 1024} END {print total}')
+   shorten ${rss} rss
+   name_val Used "${rss} used according to 'ps -eo rss'"
 
    name_val Swappiness "$(sysctl vm.swappiness 2>&1)"
    name_val DirtyPolicy "$(sysctl vm.dirty_ratio 2>&1) $(sysctl vm.dirty_background_ratio 2>&1)"
-   name_val DirtyStatus "$(sysctl vm.dirty_bytes 2>&1) $(sysctl vm.dirty_background_bytes 2>&1)"
-
-   if dmidecode > /tmp/aspersa 2>/dev/null; then
-      echo -n "" > /tmp/aspersa2
-      # From the sed one-liners at http://sed.sourceforge.net/sed1line.txt
-      # To print a paragraph containing a pattern.
-      sed -e '/./{H;$!d;}' -e 'x;/Memory Device\n/!d;' /tmp/aspersa \
-            | grep '\(Size\|Type\|Form.Factor\|Type.Detail\|Speed\):' \
-      | while read line; do
-         temp=$(echo "$line" | cut -d: -f2);
-         echo -n ";${temp}" >> /tmp/aspersa2
-         if echo "${line}" | grep -q Speed; then
-            echo "" >> /tmp/aspersa2
-         fi
-      done
-
-      cut -c3- /tmp/aspersa2 | sort | uniq -c | while read line; do
-         count="`echo $line | awk '{print $1}'`"
-         tempresult="${count}x`echo $line | cut -d: -f 2- | cut -c2-`"
-         name_val "Memory Chip" "${tempresult}"
-      done
-
-      # TODO: [root@kanga ~]# dmidecode -s system-product-name
-      # system-manufacturer Dell Inc.
-      # Add info about software RAID
-      # collapse mounted & free space together
-
-   else
-      name_val "Memory Chip" "Can't execute dmidecode to get chip info."
+   if sysctl vm.dirty_bytes > /dev/null 2>&1; then
+      name_val DirtyStatus "$(sysctl vm.dirty_bytes 2>&1) $(sysctl vm.dirty_background_bytes 2>&1)"
    fi
 
+   if dmidecode > /tmp/aspersa 2>/dev/null; then
+      parse_dmidecode_mem_devices
+   fi
+
+   # TODO: Add info about software RAID
    # ########################################################################
    # Disks, RAID, Filesystems
    # ########################################################################
-
    section "Mounted_Filesystems"
-
-   echo "Filesystem                    Size   Used  Avail Use% Type/Opts Mountpoint";
-   mount > /tmp/aspersa
-   df -hP | grep -v Filesystem | while read line; do
-      dev=$(echo "${line}" | awk '{print $1}');
-      fs=$(grep "${dev}\>" /tmp/aspersa | awk '{print $(NF-1)}');
-      opts=$(grep "${dev}\>" /tmp/aspersa | awk '{print $NF}');
-      fs="${fs}${opts}"
-      echo "${line} ${fs}" | awk '{printf "%-30s%4s%7s%7s%5s %-9s %s\n", $1, $2, $3, $4, $5, $7, $6}'
-   done
+   join <(df -hP|sort) <(mount|sort) > /tmp/aspersa
+   parse_filesystems
 
    section "Disk_Schedulers_And_Queue_Size"
 

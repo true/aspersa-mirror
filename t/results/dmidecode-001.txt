@@ -1,0 +1,4 @@
+       DIMMs |     Size    Speed Form Factor Type       Type Detail
+             | ======== ======== =========== ========== ===========
+                2048 MB  800 MHz SODIMM      Other      Synchronous
+                2048 MB  800 MHz SODIMM      Other      Synchronous

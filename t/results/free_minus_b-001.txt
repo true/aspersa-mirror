@@ -1,0 +1,5 @@
+       Total | 3.89G
+        Free | 1.42G
+        Used | 2.47G physical + 0.00k swap = 2.47G virtual
+     Buffers | 131.84M
+      Caches | 1.92G
