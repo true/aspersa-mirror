@@ -1,0 +1,4 @@
+  Processors | 1 physical, 2 cores, 2 virtual, no hyperthreading
+      Speeds | 2x1300.000
+      Models | 2xGenuine Intel(R) CPU U7300 @ 1.30GHz
+      Caches | 2x3072 KB
