@@ -10,13 +10,14 @@
 # ########################################################################
 
 # ########################################################################
-# Globals, functions
+# Globals, helper functions
 # ########################################################################
 
 # The temp files are for storing working results so we don't call commands many
-# times (gives inconsistent results).  They must not exist -- if they did,
-# someone would symlink them to /etc/passwd and then run this program as root.
-# Call this function with "check", "rm", or "touch" as an argument.
+# times (gives inconsistent results, maybe adds load on things I don't want to
+# such as RAID controllers).  They must not exist -- if they did, someone would
+# symlink them to /etc/passwd and then run this program as root.  Call this
+# function with "check", "rm", or "touch" as an argument.
 temp_files() {
    for file in /tmp/aspersa /tmp/aspersa2; do
       case "$1" in
@@ -81,365 +82,385 @@ shorten() {
    export "$2"="$result$unit"
 }
 
-# ########################################################################
-# Begin the script
-# ########################################################################
-temp_files "check"
-temp_files "touch"
-section Aspersa_System_Summary_Report
+# ##############################################################################
+# Function to take a file and collapse it into an aggregated list.  This
+# function works on $1, which it expects to be created with 'sort |
+# uniq -c'.  Leading whitespace is deleted.  The result is stored into the
+# variable named in $2.  The result will look like "4xabc, 1xdef"
+# ##############################################################################
+group_concat () {
+   export "${2}"="$(sed -e '{H; $!d}' -e 'x' -e 's/\n[[:space:]]*\([[:digit:]]*\)[[:space:]]*/, \1x/g' -e 's/[[:space:]][[:space:]]*/ /g' -e 's/, //' ${1})"
+   # In words: save the paragraph into the hold space,
+   # {H; $!d}
+   # Swap it back into the pattern space,
+   # x
+   # Join lines with a comma, delete leading whitespace, and put an 'x' between
+   # the number and the text that follows,
+   # s/\n[[:space:]]*\([[:digit:]]*\)[[:space:]]*/, \1x/g
+   # Collapse whitespace,
+   # s/[[:space:]][[:space:]]*/ /g
+   # And delete the leading comma-space.
+   # s/, //
+}
 
-# ########################################################################
-# General date, time, load, etc
-# ########################################################################
-name_val "Current date" "`date -u +'%F %T UTC'` (local TZ: `date +'%Z %z'`)"
-name_val "Hostname" `uname -n`
-name_val "Uptime" "`uptime | cut -dp -f2 | cut -c2-`"
+# ##############################################################################
+# Functions for parsing specific files and getting desired info from them.
+# These are called from within main() and are separated so they can be tested
+# easily.  The calling convention is that the data they need to run is prepared
+# first by putting it into /tmp/aspersa.  Then code that's testing just needs to
+# put sample data into /tmp/aspersa and call it.
+# ##############################################################################
 
-# Try to find all sorts of different files that say what the release is.
-if [ -e /etc/fedora-release ]; then
-   release=`cat /etc/fedora-release`;
-elif [ -e /etc/redhat-release ]; then
-   release=`cat /etc/redhat-release`;
-elif [ -e /etc/system-release ]; then
-   release=`cat /etc/system-release`;
-elif [ -e /etc/debian_version ]; then
-   release="Debian-based; version $(cat /etc/debian_version)";
-elif ls /etc/*release 2>/dev/null; then
-   if grep -q DISTRIB_DESCRIPTION /etc/*release; then
-      release=$(grep DISTRIB_DESCRIPTION /etc/*release | head -n1);
+# ##############################################################################
+# Parse Linux's /proc/cpuinfo.
+# ##############################################################################
+parse_proc_cpuinfo () {
+   # Physical processors are indicated by distinct 'physical id'.  Virtual CPUs
+   # are indicated by paragraphs -- one per paragraph.  We assume that all
+   # processors are identical, i.e. that there are not some processors with dual
+   # cores and some with quad cores.
+   virtual=$(grep -c ^processor /tmp/aspersa);
+   physical=$(grep 'physical id' /tmp/aspersa | sort -u | wc -l);
+   cores=$(grep 'cpu cores' /tmp/aspersa | head -n 1 | cut -d: -f2);
+
+   # Older kernel won't have 'physical id' or 'cpu cores'.
+   if [ "${physical}" = "0" ]; then physical=${virtual}; fi
+   if [ -z "${cores}" ]; then cores=0; fi
+
+   # Test for HTT; cannot trust the 'ht' flag.  If physical * cores < virtual,
+   # then hyperthreading is in use.
+   cores=$((${cores} * ${physical}));
+   if [ ${cores} -gt 0 -a $cores -lt $virtual ]; then htt=has; else htt=no; fi
+
+   name_val "Processors" "${physical} physical, ${cores} cores, ${virtual} virtual, ${htt} hyperthreading"
+
+   awk -F: '/cpu MHz/{print $2}' /tmp/aspersa \
+      | sort | uniq -c > /tmp/aspersa2
+   group_concat /tmp/aspersa2 val
+   name_val "Speeds" "${val}"
+
+   awk -F: '/model name/{print $2}' /tmp/aspersa \
+      | sort | uniq -c > /tmp/aspersa2
+   group_concat /tmp/aspersa2 val
+   name_val "Models" "${val}"
+
+   awk -F: '/cache size/{print $2}' /tmp/aspersa \
+      | sort | uniq -c > /tmp/aspersa2
+   group_concat /tmp/aspersa2 val
+   name_val "Caches" "${val}"
+}
+
+# ##############################################################################
+# The main() function is called at the end of the script.  This makes it
+# testable.  Major bits of parsing are separated into functions for testability.
+# As a general rule, we cannot 'cp' files from /proc, because they might be
+# empty afterwards.  (I've seen 'cp /proc/cpuinfo' create an empty file.)  But
+# 'cat' works okay.
+# ##############################################################################
+main () {
+   temp_files "check"
+   temp_files "touch"
+   section Aspersa_System_Summary_Report
+
+   # ########################################################################
+   # General date, time, load, etc
+   # ########################################################################
+   name_val "Current date" "`date -u +'%F %T UTC'` (local TZ: `date +'%Z %z'`)"
+   name_val "Hostname" `uname -n`
+   name_val "Uptime" "`uptime | cut -dp -f2 | cut -c2-`"
+
+   # Try to find all sorts of different files that say what the release is.
+   if [ -e /etc/fedora-release ]; then
+      release=$(cat /etc/fedora-release);
+   elif [ -e /etc/redhat-release ]; then
+      release=$(cat /etc/redhat-release);
+   elif [ -e /etc/system-release ]; then
+      release=$(cat /etc/system-release);
+   elif [ -e /etc/debian_version ]; then
+      release="Debian-based; version $(cat /etc/debian_version)";
+   elif ls /etc/*release 2>/dev/null; then
+      if grep -q DISTRIB_DESCRIPTION /etc/*release; then
+         release=$(grep DISTRIB_DESCRIPTION /etc/*release | head -n1);
+      else
+         release=$(cat /etc/*release | head -n1);
+      fi
+   fi
+   name_val Release "${release}"
+   name_val Kernel "$(uname -r)"
+
+   CPU_ARCH='32-bit'
+   if grep -q ' lm ' /proc/cpuinfo; then
+      CPU_ARCH='64-bit'
+   fi
+   OS_ARCH='32-bit'
+   if file -L /bin/sh | grep -q '64-bit'; then
+      OS_ARCH='64-bit'
+   fi
+   name_val "Architecture" "$CPU_ARCH CPU, $OS_ARCH OS"
+
+   # Threading library
+   name_val Threading "$(getconf GNU_LIBPTHREAD_VERSION)"
+   if [ -f /lib/libc.so.6 ]; then
+      name_val "Compiled by" "$(/lib/libc.so.6 | grep 'Compiled by' | cut -c13-)"
+   fi
+
+   if [ -e /selinux ]; then
+      name_val "SELinux" "$(getenforce 2>&1)";
    else
-      release=$(cat /etc/*release | head -n1);
+      name_val "SELinux" "Does not exist";
    fi
-fi
-name_val Release "${release}"
-name_val Kernel "$(uname -r)"
 
-CPU_ARCH='32-bit'
-if grep -q ' lm ' /proc/cpuinfo; then
-   CPU_ARCH='64-bit'
-fi
-OS_ARCH='32-bit'
-if file -L /bin/sh | grep -q '64-bit'; then
-   OS_ARCH='64-bit'
-fi
-name_val "Architecture" "$CPU_ARCH CPU, $OS_ARCH OS"
+   # ########################################################################
+   # Processor/CPU section
+   # ########################################################################
+   section Processor
+   cat /proc/cpuinfo > /tmp/aspersa
+   parse_proc_cpuinfo
 
-# Threading library
-name_val Threading "$(getconf GNU_LIBPTHREAD_VERSION)"
-if [ -f /lib/libc.so.6 ]; then
-   name_val "Compiled by" "$(/lib/libc.so.6 | grep 'Compiled by' | cut -c13-)"
-fi
+   # ########################################################################
+   # Memory
+   # ########################################################################
+   section Memory
 
-if [ -e /selinux ]; then
-   name_val "SELinux" "$(getenforce 2>&1)";
-else
-   name_val "SELinux" "Does not exist";
-fi
+   free -b > /tmp/aspersa
 
-# ########################################################################
-# Processor
-# ########################################################################
-section Processor
+   val=`grep Mem /tmp/aspersa | awk '{print $2}'`
+   shorten $val val
+   name_val Total $val
 
-# Physical processors are indicated by distinct 'physical id'.  Virtual CPUs are
-# indicated by paragraphs -- one per paragraph.  If physical*cores < virtual,
-# then hyperthreading is in use.  NOTE: We assume that all processors are
-# identical, i.e. that there are not some processors with dual cores and some
-# with quad cores.  The 'ht' flag in /proc/cpuinfo is NOT trustworthy.  We also
-# cannot 'cp' files from /proc, because they might be empty afterwards.  (I've
-# seen 'cp /proc/cpuinfo' create an empty file.)
-cat /proc/cpuinfo > /tmp/aspersa
-physical=$(grep 'physical id' /tmp/aspersa | sort -u | wc -l);
-virtual=$(grep -c ^processor /tmp/aspersa);
+   val=`grep Mem /tmp/aspersa | awk '{print $3}'`
+   val2=$(grep Swap /tmp/aspersa | awk '{print $3}')
+   val3=$(($val + $val2))
+   shorten $val val
+   shorten $val2 val2
+   shorten $val3 val3
+   name_val Used "${val} physical + ${val2} swap = ${val3} virtual"
 
-# Older kernel won't have 'physical id'.
-if [ "${physical}" = "0" ]; then
-   physical=${virtual}
-fi
+   val=$(ps -eo rss | awk '/[0-9]/{total += $1 * 1024} END {print total}')
+   shorten $val val
+   name_val Used "${val} used according to 'ps -eo rss'"
 
-# Older kernel won't have 'cpu cores', either.
-cores=$(grep 'cpu cores' /tmp/aspersa | head -n 1 | cut -d: -f2);
-if [ -z "${cores}" ]; then cores=0; fi
+   val=`grep Mem /tmp/aspersa | awk '{print $4}'`
+   shorten $val val
+   name_val Free $val
 
-# Test for HTT
-cores=$((${cores} * ${physical}));
-if [ ${cores} -gt 0 -a $cores -lt $virtual ]; then
-   htt=has
-else
-   htt=no
-fi
+   val=`grep Mem /tmp/aspersa | awk '{print $6}'`
+   shorten $val val
+   name_val Buffers $val
 
-name_val "Processors" "${physical} physical, ${cores} cores, ${virtual} virtual, ${htt} hyperthreading"
+   val=`grep Mem /tmp/aspersa | awk '{print $7}'`
+   shorten $val val
+   name_val Cached $val
 
-# We have to avoid cmd|while loops, because they spawn a subshell.  But we can
-# do a while...done<file loop OK.
-tempresult=""
-grep MHz /tmp/aspersa | sort | uniq -c > /tmp/aspersa2
-while read line; do # See the end of the loop, we are reading in there.
-   count=$(echo $line | awk '{print $1}')
-   speed=$(echo $line | awk '{print $5}' | cut -d. -f1)
-   if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
-   tempresult="${tempresult}${count}x${speed} MHz"
-done < /tmp/aspersa2
-name_val "Speeds" "$tempresult"
+   name_val Swappiness "$(sysctl vm.swappiness 2>&1)"
+   name_val DirtyPolicy "$(sysctl vm.dirty_ratio 2>&1) $(sysctl vm.dirty_background_ratio 2>&1)"
+   name_val DirtyStatus "$(sysctl vm.dirty_bytes 2>&1) $(sysctl vm.dirty_background_bytes 2>&1)"
 
-tempresult=""
-grep 'model name' /tmp/aspersa | sort | uniq -c > /tmp/aspersa2
-while read line; do
-   count=$(echo $line | awk '{print $1}')
-   if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
-   tempresult="${tempresult}${count}x`echo $line | cut -d: -f 2- | cut -c2-`"
-done < /tmp/aspersa2
-name_val "Models" "${tempresult}"
+   if dmidecode > /tmp/aspersa 2>/dev/null; then
+      echo -n "" > /tmp/aspersa2
+      # From the sed one-liners at http://sed.sourceforge.net/sed1line.txt
+      # To print a paragraph containing a pattern.
+      sed -e '/./{H;$!d;}' -e 'x;/Memory Device\n/!d;' /tmp/aspersa \
+            | grep '\(Size\|Type\|Form.Factor\|Type.Detail\|Speed\):' \
+      | while read line; do
+         temp=$(echo "$line" | cut -d: -f2);
+         echo -n ";${temp}" >> /tmp/aspersa2
+         if echo "${line}" | grep -q Speed; then
+            echo "" >> /tmp/aspersa2
+         fi
+      done
 
-tempresult=""
-grep 'cache size' /tmp/aspersa | sort | uniq -c > /tmp/aspersa2
-while read line; do
-   count="`echo $line | awk '{print $1}'`"
-   if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
-   tempresult="${tempresult}${count}x`echo $line | cut -d: -f 2- | cut -c2-`"
-done < /tmp/aspersa2
-name_val "Caches" "${tempresult}"
+      cut -c3- /tmp/aspersa2 | sort | uniq -c | while read line; do
+         count="`echo $line | awk '{print $1}'`"
+         tempresult="${count}x`echo $line | cut -d: -f 2- | cut -c2-`"
+         name_val "Memory Chip" "${tempresult}"
+      done
 
-# ########################################################################
-# Memory
-# ########################################################################
-section Memory
+      # TODO: [root@kanga ~]# dmidecode -s system-product-name
+      # system-manufacturer Dell Inc.
+      # Add info about software RAID
+      # collapse mounted & free space together
 
-free -b > /tmp/aspersa
+   else
+      name_val "Memory Chip" "Can't execute dmidecode to get chip info."
+   fi
 
-val=`grep Mem /tmp/aspersa | awk '{print $2}'`
-shorten $val val
-name_val Total $val
+   # ########################################################################
+   # Disks, RAID, Filesystems
+   # ########################################################################
 
-val=`grep Mem /tmp/aspersa | awk '{print $3}'`
-val2=$(grep Swap /tmp/aspersa | awk '{print $3}')
-val3=$(($val + $val2))
-shorten $val val
-shorten $val2 val2
-shorten $val3 val3
-name_val Used "${val} physical + ${val2} swap = ${val3} virtual"
+   section "Mounted_Filesystems"
 
-val=$(ps -eo rss | awk '/[0-9]/{total += $1 * 1024} END {print total}')
-shorten $val val
-name_val Used "${val} used according to 'ps -eo rss'"
-
-val=`grep Mem /tmp/aspersa | awk '{print $4}'`
-shorten $val val
-name_val Free $val
-
-val=`grep Mem /tmp/aspersa | awk '{print $6}'`
-shorten $val val
-name_val Buffers $val
-
-val=`grep Mem /tmp/aspersa | awk '{print $7}'`
-shorten $val val
-name_val Cached $val
-
-name_val Swappiness "$(sysctl vm.swappiness 2>&1)"
-name_val DirtyPolicy "$(sysctl vm.dirty_ratio 2>&1) $(sysctl vm.dirty_background_ratio 2>&1)"
-name_val DirtyStatus "$(sysctl vm.dirty_bytes 2>&1) $(sysctl vm.dirty_background_bytes 2>&1)"
-
-if dmidecode > /tmp/aspersa 2>/dev/null; then
-   echo -n "" > /tmp/aspersa2
-   # From the sed one-liners at http://sed.sourceforge.net/sed1line.txt
-   # To print a paragraph containing a pattern.
-   sed -e '/./{H;$!d;}' -e 'x;/Memory Device\n/!d;' /tmp/aspersa \
-         | grep '\(Size\|Type\|Form.Factor\|Type.Detail\|Speed\):' \
-   | while read line; do
-      temp=$(echo "$line" | cut -d: -f2);
-      echo -n ";${temp}" >> /tmp/aspersa2
-      if echo "${line}" | grep -q Speed; then
-         echo "" >> /tmp/aspersa2
-      fi
+   echo "Filesystem                    Size   Used  Avail Use% Type/Opts Mountpoint";
+   mount > /tmp/aspersa
+   df -hP | grep -v Filesystem | while read line; do
+      dev=$(echo "${line}" | awk '{print $1}');
+      fs=$(grep "${dev}\>" /tmp/aspersa | awk '{print $(NF-1)}');
+      opts=$(grep "${dev}\>" /tmp/aspersa | awk '{print $NF}');
+      fs="${fs}${opts}"
+      echo "${line} ${fs}" | awk '{printf "%-30s%4s%7s%7s%5s %-9s %s\n", $1, $2, $3, $4, $5, $7, $6}'
    done
 
-   cut -c3- /tmp/aspersa2 | sort | uniq -c | while read line; do
-      count="`echo $line | awk '{print $1}'`"
-      tempresult="${count}x`echo $line | cut -d: -f 2- | cut -c2-`"
-      name_val "Memory Chip" "${tempresult}"
+   section "Disk_Schedulers_And_Queue_Size"
+
+   for disk in /sys/block/[h,s]d*; do
+      name_val "${disk}" "$(cat ${disk}/queue/scheduler | grep -o '\[.*\]') $(cat ${disk}/queue/nr_requests)"
    done
 
-   # TODO: [root@kanga ~]# dmidecode -s system-product-name
-   # system-manufacturer Dell Inc.
-   # Add info about software RAID
-   # collapse mounted & free space together
+   section "LVM_Volumes"
 
-else
-   name_val "Memory Chip" "Can't execute dmidecode to get chip info."
-fi
+   if lvs >/dev/null 2>&1; then
+      lvs
+   else
+      echo "Cannot execute 'lvs'";
+   fi
 
-# ########################################################################
-# Disks, RAID, Filesystems
-# ########################################################################
+   section "RAID_Controller"
 
-section "Mounted_Filesystems"
+   dmesg | grep '^scsi[0-9]' > /tmp/aspersa
+   if grep -qi ': .*megaraid' /tmp/aspersa; then
+      controller='LSI Logic MegaRAID'
+   elif grep -q ': aacraid' /tmp/aspersa; then
+      controller='AACRAID'
+   elif grep -q ': 3ware [0-9]* Storage Controller' /tmp/aspersa; then
+      controller='3Ware'
+   fi
 
-echo "Filesystem                    Size   Used  Avail Use% Type/Opts Mountpoint";
-mount > /tmp/aspersa
-df -hP | grep -v Filesystem | while read line; do
-   dev=$(echo "${line}" | awk '{print $1}');
-   fs=$(grep "${dev}\>" /tmp/aspersa | awk '{print $(NF-1)}');
-   opts=$(grep "${dev}\>" /tmp/aspersa | awk '{print $NF}');
-   fs="${fs}${opts}"
-   echo "${line} ${fs}" | awk '{printf "%-30s%4s%7s%7s%5s %-9s %s\n", $1, $2, $3, $4, $5, $7, $6}'
-done
+   if [ -z "${controller}" ]; then
+      echo "No RAID controller detected"
+   else
+      name_val Controller "${controller}"
 
-section "Disk_Schedulers_And_Queue_Size"
+      if [ "${controller}" = "AACRAID" ]; then
+         if /usr/StorMan/arcconf getconfig 1 > /tmp/aspersa; then
+            tempresult=$(grep 'Controller Model' /tmp/aspersa | cut -d: -f2)
+            tempresult="${tempresult},$(grep 'Channel description' /tmp/aspersa | cut -d: -f2)"
+            tempresult="${tempresult},$(grep 'Installed memory' /tmp/aspersa | cut -d: -f2)"
+            tempresult="${tempresult},$(grep 'Controller Status' /tmp/aspersa | cut -d: -f2)"
+            name_val Model "${tempresult}"
 
-for disk in /sys/block/[h,s]d*; do
-   name_val "${disk}" "$(cat ${disk}/queue/scheduler | grep -o '\[.*\]') $(cat ${disk}/queue/nr_requests)"
-done
+            grep -A5 'Controller Battery Info' /tmp/aspersa > /tmp/aspersa2
+            tempresult=$(grep 'Capacity remaining' /tmp/aspersa2 | cut -d: -f2)
+            tempresult="${tempresult},$(grep 'Status' /tmp/aspersa2 | cut -d: -f2)"
+            name_val Battery "${tempresult}"
 
-section "LVM_Volumes"
+            for dev in $(grep 'Logical device number' /tmp/aspersa | awk '{print $4}'); do
+               # Print the logical device's info to /tmp/aspersa2
+               sed -n -e "/Logical device number ${dev}/,/^$\|^Logical device number/p" /tmp/aspersa > /tmp/aspersa2
+               get_keyval "Logical device name" "/tmp/aspersa2" "tempresult"
+          name_val "Log'l Dev #${dev}" "Name:${tempresult}"
+               get_keyval "Size" "/tmp/aspersa2" "tempresult"
+               device="Size=${tempresult}"
+               get_keyval "RAID level" "/tmp/aspersa2" "tempresult"
+               device="${device}, RAID=${tempresult}"
+               get_keyval "Stripe-unit" "/tmp/aspersa2" "tempresult"
+               device="${device}, Stripe=${tempresult}"
+               get_keyval "Status of" "/tmp/aspersa2" "tempresult"
+               device="${device}, Status=${tempresult}"
+               name_val "" "${device//_/ }"
+               get_keyval "Write-cache mode" "/tmp/aspersa2" "tempresult"
+               name_val "" "Write Cache Mode ${tempresult//_/ }"
+               tempresult=$(grep -c 'Group [0-9]*, Segment' /tmp/aspersa2)
+               name_val "" "Segments/Disks ${tempresult}"
+            done
 
-if lvs >/dev/null 2>&1; then
-   lvs
-else
-   echo "Cannot execute 'lvs'";
-fi
+            # Get the info on physical devices.  Print the whole paragraph to
+            # /tmp/aspersa2 and then read that in to examine it.
+            tempresult=""
+            sed -n -e "/Physical Device information/,/^$/p" /tmp/aspersa \
+               | grep 'Device is a' | cut -b22- | tr ' ' _ | sort \
+               | uniq -c > /tmp/aspersa2
+            while read line; do
+               count=$(echo $line | awk '{print $1}')
+               device="$(echo $line | awk '{print $2}')"
+               if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
+               tempresult="${tempresult}${count}x${device}"
+            done < /tmp/aspersa2
+            name_val "Phys Devs #${dev}" "${tempresult//_/ }"
 
-section "RAID_Controller"
+            tempresult=""
+            sed -n -e "/Physical Device information/,/^$/p" /tmp/aspersa \
+               | grep 'Transfer Speed' | cut -b47- | tr ' ' _ | sort \
+               | uniq -c > /tmp/aspersa2
+            while read line; do
+               count=$(echo $line | awk '{print $1}')
+               device="$(echo $line | awk '{print $2}')"
+               if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
+               tempresult="${tempresult}${count}x${device}"
+            done < /tmp/aspersa2
+            name_val "" "XFer Spds: ${tempresult//_/ }"
 
-dmesg | grep '^scsi[0-9]' > /tmp/aspersa
-if grep -qi ': .*megaraid' /tmp/aspersa; then
-   controller='LSI Logic MegaRAID'
-elif grep -q ': aacraid' /tmp/aspersa; then
-   controller='AACRAID'
-elif grep -q ': 3ware [0-9]* Storage Controller' /tmp/aspersa; then
-   controller='3Ware'
-fi
+            tempresult=""
+            sed -n -e "/Physical Device information/,/^$/p" /tmp/aspersa \
+               | grep 'Size' | cut -b47- | tr ' ' _ | sort \
+               | uniq -c > /tmp/aspersa2
+            while read line; do
+               count=$(echo $line | awk '{print $1}')
+               device="$(echo $line | awk '{print $2}')"
+               if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
+               tempresult="${tempresult}${count}x${device}"
+            done < /tmp/aspersa2
+            name_val "" "Dev Sizes: ${tempresult//_/ }"
 
-if [ -z "${controller}" ]; then
-   echo "No RAID controller detected"
-else
-   name_val Controller "${controller}"
-   
-   if [ "${controller}" = "AACRAID" ]; then
-      if /usr/StorMan/arcconf getconfig 1 > /tmp/aspersa; then
-         tempresult=$(grep 'Controller Model' /tmp/aspersa | cut -d: -f2)
-         tempresult="${tempresult},$(grep 'Channel description' /tmp/aspersa | cut -d: -f2)"
-         tempresult="${tempresult},$(grep 'Installed memory' /tmp/aspersa | cut -d: -f2)"
-         tempresult="${tempresult},$(grep 'Controller Status' /tmp/aspersa | cut -d: -f2)"
-         name_val Model "${tempresult}"
-
-         grep -A5 'Controller Battery Info' /tmp/aspersa > /tmp/aspersa2
-         tempresult=$(grep 'Capacity remaining' /tmp/aspersa2 | cut -d: -f2)
-         tempresult="${tempresult},$(grep 'Status' /tmp/aspersa2 | cut -d: -f2)"
-         name_val Battery "${tempresult}"
-
-         for dev in $(grep 'Logical device number' /tmp/aspersa | awk '{print $4}'); do
-            # Print the logical device's info to /tmp/aspersa2
-            sed -n -e "/Logical device number ${dev}/,/^$\|^Logical device number/p" /tmp/aspersa > /tmp/aspersa2
-            get_keyval "Logical device name" "/tmp/aspersa2" "tempresult"
-       name_val "Log'l Dev #${dev}" "Name:${tempresult}"
-            get_keyval "Size" "/tmp/aspersa2" "tempresult"
-            device="Size=${tempresult}"
-            get_keyval "RAID level" "/tmp/aspersa2" "tempresult"
-            device="${device}, RAID=${tempresult}"
-            get_keyval "Stripe-unit" "/tmp/aspersa2" "tempresult"
-            device="${device}, Stripe=${tempresult}"
-            get_keyval "Status of" "/tmp/aspersa2" "tempresult"
-            device="${device}, Status=${tempresult}"
-            name_val "" "${device//_/ }"
-            get_keyval "Write-cache mode" "/tmp/aspersa2" "tempresult"
-            name_val "" "Write Cache Mode ${tempresult//_/ }"
-            tempresult=$(grep -c 'Group [0-9]*, Segment' /tmp/aspersa2)
-            name_val "" "Segments/Disks ${tempresult}"
-         done
-
-         # Get the info on physical devices.  Print the whole paragraph to
-         # /tmp/aspersa2 and then read that in to examine it.
-         tempresult=""
-         sed -n -e "/Physical Device information/,/^$/p" /tmp/aspersa \
-            | grep 'Device is a' | cut -b22- | tr ' ' _ | sort \
-            | uniq -c > /tmp/aspersa2
-         while read line; do
-            count=$(echo $line | awk '{print $1}')
-            device="$(echo $line | awk '{print $2}')"
-            if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
-            tempresult="${tempresult}${count}x${device}"
-         done < /tmp/aspersa2
-         name_val "Phys Devs #${dev}" "${tempresult//_/ }"
-
-         tempresult=""
-         sed -n -e "/Physical Device information/,/^$/p" /tmp/aspersa \
-            | grep 'Transfer Speed' | cut -b47- | tr ' ' _ | sort \
-            | uniq -c > /tmp/aspersa2
-         while read line; do
-            count=$(echo $line | awk '{print $1}')
-            device="$(echo $line | awk '{print $2}')"
-            if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
-            tempresult="${tempresult}${count}x${device}"
-         done < /tmp/aspersa2
-         name_val "" "XFer Spds: ${tempresult//_/ }"
-
-         tempresult=""
-         sed -n -e "/Physical Device information/,/^$/p" /tmp/aspersa \
-            | grep 'Size' | cut -b47- | tr ' ' _ | sort \
-            | uniq -c > /tmp/aspersa2
-         while read line; do
-            count=$(echo $line | awk '{print $1}')
-            device="$(echo $line | awk '{print $2}')"
-            if [ -n "$tempresult" ]; then tempresult="${tempresult}, "; fi
-            tempresult="${tempresult}${count}x${device}"
-         done < /tmp/aspersa2
-         name_val "" "Dev Sizes: ${tempresult//_/ }"
-
+         fi
       fi
    fi
-fi
 
-# TODO: if the controller is megaraid but we can't execute the MegaSAS tool,
-# then try grepping dmesg for the following and outputting that:
-#grep -A20 'scanning.*logical drives' /tmp/aspersa | grep 'Vendor:\|Type:'
+   # TODO: if the controller is megaraid but we can't execute the MegaSAS tool,
+   # then try grepping dmesg for the following and outputting that:
+   #grep -A20 'scanning.*logical drives' /tmp/aspersa | grep 'Vendor:\|Type:'
 
-# ########################################################################
-# Virtualization
-# ########################################################################
-section Virtualization
+   # ########################################################################
+   # Virtualization
+   # ########################################################################
+   section Virtualization
 
-lspci > /tmp/aspersa
-if grep -qi virtualbox /tmp/aspersa; then
-   virt=VirtualBox
-elif grep -qi vmware /tmp/aspersa; then
-   virt=VMWare
-elif [ -e /proc/user_beancounters ]; then
-   virt="OpenVZ/Virtuozzo"
-else
-   dmesg > /tmp/aspersa
-   if grep -qi vmware /tmp/aspersa; then
+   lspci > /tmp/aspersa
+   if grep -qi virtualbox /tmp/aspersa; then
       virt=VirtualBox
+   elif grep -qi vmware /tmp/aspersa; then
+      virt=VMWare
+   elif [ -e /proc/user_beancounters ]; then
+      virt="OpenVZ/Virtuozzo"
+   else
+      dmesg > /tmp/aspersa
+      if grep -qi vmware /tmp/aspersa; then
+         virt=VirtualBox
+      fi
    fi
-fi
 
-if [ -z "${virt}" ]; then
-   echo "No virtualization detected"
-else
-   name_val Technology "${virt}"
-fi
+   if [ -z "${virt}" ]; then
+      echo "No virtualization detected"
+   else
+      name_val Technology "${virt}"
+   fi
 
-# ########################################################################
-# Processes, load, etc
-# ########################################################################
-section Top_Processes
-top -bn 1 | sed -e 's# *$##g' -e '/./{H;$!d;}' -e 'x;/PID/!d;' | head 
+   # ########################################################################
+   # Processes, load, etc
+   # ########################################################################
+   section Top_Processes
+   top -bn 1 | sed -e 's# *$##g' -e '/./{H;$!d;}' -e 'x;/PID/!d;' | head 
 
-# TODO vmstat 5 5 | grep '[0-9]'
-# TODO:   /proc/sys/net/ipv4/ip_local_port_range
-# TODO:   /proc/sys/net/ipv4/tcp_fin_timeout
-# netstat -antp | grep 3306 | awk '{print $5}' | cut -d: -f1 | sort | uniq -c |
-# sort -rn
-# ifconfig # //check for errors//
-# megarc -AdpBbuCmd -GetBbuStatus -aALL
-# /opt/MegaRAID/MegaCli/MegaCli64 -AdpAllInfo -aALL
-# /opt/MegaRAID/MegaCli/MegaCli64 -AdpBbuCmd -GetBbuStatus -aALL 
-# /usr/StorMan/arcconf GETCONFIG 1 LD 1
+   # TODO vmstat 5 5 | grep '[0-9]'
+   # TODO:   /proc/sys/net/ipv4/ip_local_port_range
+   # TODO:   /proc/sys/net/ipv4/tcp_fin_timeout
+   # netstat -antp | grep 3306 | awk '{print $5}' | cut -d: -f1 | sort | uniq -c |
+   # sort -rn
+   # ifconfig # //check for errors//
+   # megarc -AdpBbuCmd -GetBbuStatus -aALL
+   # /opt/MegaRAID/MegaCli/MegaCli64 -AdpAllInfo -aALL
+   # /opt/MegaRAID/MegaCli/MegaCli64 -AdpBbuCmd -GetBbuStatus -aALL 
+   # /usr/StorMan/arcconf GETCONFIG 1 LD 1
 
 
-# ########################################################################
-# All done.  Signal the end so it's explicit.
-# ########################################################################
-temp_files "rm"
-temp_files "check"
-section The_End
+   # ########################################################################
+   # All done.  Signal the end so it's explicit.
+   # ########################################################################
+   temp_files "rm"
+   temp_files "check"
+   section The_End
+}
+
+# Execute the program if it was not included from another file.  This makes it
+# possible to include and thus test.
+if [ $(basename "$0") = "summary" ]; then main $*; fi
