@@ -44,7 +44,7 @@ temp_files() {
 # underscores to spaces.  End result is a line of hashes with words at the
 # start.
 section () {
-   printf -vline "#_%-60s" "$1_"
+   line="$(printf '#_%-60s' "$1_")"
    line="${line// /#}"
    printf "%s\n" "${line//_/ }"
 }
