@@ -24,7 +24,7 @@ for GL_file in `ls auto-tests`; do
    if [ -x "${GL_file}" ]; then
       $GL_file "${GL_reference}" "${GL_input}"
    else
-      echo "not OK ${GL_file} (not executable)"
+      echo "NOK ${GL_file} (not executable)"
       continue
    fi
 
@@ -32,10 +32,12 @@ for GL_file in `ls auto-tests`; do
    ${GL_cmd} > "${GL_result}"
 
    # Is the result the same as the reference result?
-   if diff -q "${GL_result}" "${GL_reference}"; then
-      echo "OK $GL_cmd $GL_file"
+   if diff -q "${GL_result}" "${GL_reference}" >/dev/null; then
+      echo " OK $GL_cmd $GL_file"
    else
-      echo "not OK $GL_cmd $GL_file"
+      echo "NOK $GL_cmd $GL_file"
+      # Indent and display the first 10 lines
+      diff "${GL_result}" "${GL_reference}" | sed -e 's/^/    /' -e '10q'
    fi
 
    # Clean up

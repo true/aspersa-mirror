@@ -323,6 +323,125 @@ parse_lsi_megaraid_adapter_info () {
 }
 
 # ##############################################################################
+# Parse the output (saved in /tmp/aspersa) of
+# /opt/MegaRAID/MegaCli/MegaCli64 -AdpBbuCmd -GetBbuStatus -aALL
+# ##############################################################################
+parse_lsi_megaraid_bbu_status () {
+   charge=$(awk '/Relative State/{print $5}' /tmp/aspersa);
+   temp=$(awk '/^Temperature/{print $2}' /tmp/aspersa);
+   soh=$(awk '/isSOHGood:/{print $2}' /tmp/aspersa);
+   name_val BBU "${charge}% Charged, Temperature ${temp}C, isSOHGood=${soh}"
+}
+
+# ##############################################################################
+# Parse physial devices from the output (saved in /tmp/aspersa) of
+# /opt/MegaRAID/MegaCli/MegaCli64 -LdPdInfo -aALL
+# OR, it will also work with the output of
+# /opt/MegaRAID/MegaCli/MegaCli64 -PDList -aALL 
+# ##############################################################################
+parse_lsi_megaraid_devices () {
+   echo
+   echo "  PhysiclDev Type State   Errors Vendor  Model        Size"
+   echo "  ========== ==== ======= ====== ======= ============ ==========="
+   for dev in $(awk '/Device Id/{print $3}' /tmp/aspersa); do
+      sed -e '/./{H;$!d;}' -e "x;/Device Id: ${dev}/!d;" /tmp/aspersa \
+      | awk '
+         /Media Type/                        {d=substr($0, index($0, ":") + 2)}
+         /PD Type/                           {t=$3}
+         /Firmware state/                    {s=$3}
+         /Media Error Count/                 {me=$4}
+         /Other Error Count/                 {oe=$4}
+         /Predictive Failure Count/          {pe=$4}
+         /Inquiry Data/                      {v=$3; m=$4;}
+         /Raw Size/                          {z=$3}
+         END {
+            printf("  %-10s %-4s %-7s %6s %-7s %-12s %-7s\n",
+               substr(d, 0, 10), t, s, me "/" oe "/" pe, v, m, z);
+         }'
+   done
+}
+
+# ##############################################################################
+# Parse virtual devices from the output (saved in /tmp/aspersa) of
+# /opt/MegaRAID/MegaCli/MegaCli64 -LdPdInfo -aALL
+# OR, it will also work with the output of
+# /opt/MegaRAID/MegaCli/MegaCli64 -LDInfo -Lall -aAll
+# ##############################################################################
+parse_lsi_megaraid_virtual_devices () {
+   # Somewhere on the Internet, I found the following guide to understanding the
+   # RAID level, but I don't know the source anymore.
+   #    Primary-0, Secondary-0, RAID Level Qualifier-0 = 0
+   #    Primary-1, Secondary-0, RAID Level Qualifier-0 = 1
+   #    Primary-5, Secondary-0, RAID Level Qualifier-3 = 5
+   #    Primary-1, Secondary-3, RAID Level Qualifier-0 = 10
+   # I am not sure if this is always correct or not (it seems correct).  The
+   # terminology MegaRAID uses is not clear to me, and isn't documented that I
+   # am aware of.  Anyone who can clarify the above, please contact me.
+   echo
+   echo "  VirtualDev Size      RAID Level Disks SpnDpth Stripe Status  Cache"
+   echo "  ========== ========= ========== ===== ======= ====== ======= ========="
+   awk '
+      /^Virtual Disk:/ {
+         device              = $3;
+         devicenames[device] = device;
+      }
+      /Number Of Drives/ {
+         devices[device ",numdisks"] = substr($0, index($0, ":") + 1);
+      }
+      /^Name:/ {
+         devices[device ",name"] = $2 > "" ? $2 : "(no name)";
+      }
+      /RAID Level/ {
+         devices[device ",primary"]   = substr($3, index($3, "-") + 1, 1);
+         devices[device ",secondary"] = substr($4, index($4, "-") + 1, 1);
+         devices[device ",qualifier"] = substr($NF, index($NF, "-") + 1, 1);
+      }
+      /Span Depth/ {
+         devices[device ",spandepth"] = substr($2, index($2, ":") + 1);
+      }
+      /Number of Spans/ {
+         devices[device ",numspans"] = $4;
+      }
+      /^Size:/ {
+         devices[device ",size"] = substr($0, index($0, ":") + 1);
+      }
+      /^State:/ {
+         devices[device ",state"] = $2;
+      }
+      /^Stripe Size:/ {
+         devices[device ",stripe"] = $3;
+      }
+      /^Current Cache Policy/ {
+         devices[device ",wpolicy"] = $4 ~ /WriteBack/ ? "WB" : "WT";
+         devices[device ",rpolicy"] = $5 ~ /ReadAheadNone/ ? "no RA" : "RA";
+      }
+      END {
+         for ( device in devicenames ) {
+            raid = 0;
+            if ( devices[device ",primary"] == 1 ) {
+               raid = 1;
+               if ( devices[device ",secondary"] == 3 ) {
+                  raid = 10;
+               }
+            }
+            else {
+               if ( devices[device ",primary"] == 5 ) {
+                  raid = 5;
+               }
+            }
+            printf("  %-10s %-9s %-10s %5d %7s %6s %-7s %s\n",
+               device devices[device ",name"],
+               devices[device ",size"],
+               raid " (" devices[device ",primary"] "-" devices[device ",secondary"] "-" devices[device ",qualifier"] ")",
+               devices[device ",numdisks"],
+               devices[device ",spandepth"] "-" devices[device ",numspans"],
+               devices[device ",stripe"], devices[device ",state"],
+               devices[device ",wpolicy"] ", " devices[device ",rpolicy"]);
+         }
+      }' /tmp/aspersa
+}
+
+# ##############################################################################
 # The main() function is called at the end of the script.  This makes it
 # testable.  Major bits of parsing are separated into functions for testability.
 # As a general rule, we cannot 'cp' files from /proc, because they might be
@@ -492,8 +611,6 @@ main () {
    # sort -rn
    # ifconfig # //check for errors//
    # megarc -AdpBbuCmd -GetBbuStatus -aALL
-   # /opt/MegaRAID/MegaCli/MegaCli64 -AdpAllInfo -aALL
-   # /opt/MegaRAID/MegaCli/MegaCli64 -AdpBbuCmd -GetBbuStatus -aALL 
 
    # ########################################################################
    # All done.  Signal the end so it's explicit.

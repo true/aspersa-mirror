@@ -30,11 +30,6 @@ Full Charge Capacity: 867 mAh
 isSOHGood: Yes
 
 Exit Code: 0x00
-[root@pc-db1 percona]# /opt/MegaRAID/MegaCli/MegaCli64 -PDList -aALL | grep Inquiry
-Inquiry Data: SEAGATE ST373455SS      S5273LQ2DZ33            
-Inquiry Data: SEAGATE ST373455SS      S5273LQ2D9RH            
-Inquiry Data: SEAGATE ST373455SS      S5273LQ2DPST            
-Inquiry Data: SEAGATE ST373455SS      S5273LQ2CKD5            
 [root@pc-db1 percona]# /opt/MegaRAID/MegaCli/MegaCli64 -PDList -aALL 
                                      
 Adapter #0
