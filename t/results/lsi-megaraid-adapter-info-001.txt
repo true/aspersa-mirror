@@ -1,2 +1,0 @@
-       Model | PERC 6/i Integrated, PCIE interface, 8 ports
-       Cache | 256MB Memory, BBU Present

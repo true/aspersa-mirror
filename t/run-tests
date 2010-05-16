@@ -1,0 +1,43 @@
+#!/bin/bash
+
+. ../summary
+
+# All variables are named GL_whatever so they don't get overwritten with stuff
+# that happens in the functions sourced from ../summary.
+GL_input="/tmp/aspersa"
+GL_reference="/tmp/aspersa-reference"
+GL_result="/tmp/aspersa-result"
+
+# Runs all test files.  The format of the test file is as follows:
+# - line 1 is the shebang
+# - line 2 is the command to run, commented out
+# - argument 1 is the file to which the reference result should be printed
+# - argument 2 is the file to which the input should be printed
+
+for GL_file in `ls auto-tests`; do
+   GL_file="auto-tests/${GL_file}"
+
+   # Get the command to run
+   GL_cmd="$(head -n2 $GL_file | tail -n1 | cut -b2-)"
+
+   # Execute the file and tell it where to save the input & reference result
+   if [ -x "${GL_file}" ]; then
+      $GL_file "${GL_reference}" "${GL_input}"
+   else
+      echo "not OK ${GL_file} (not executable)"
+      continue
+   fi
+
+   # Execute the command
+   ${GL_cmd} > "${GL_result}"
+
+   # Is the result the same as the reference result?
+   if diff -q "${GL_result}" "${GL_reference}"; then
+      echo "OK $GL_cmd $GL_file"
+   else
+      echo "not OK $GL_cmd $GL_file"
+   fi
+
+   # Clean up
+   rm -f /tmp/aspersa*
+done

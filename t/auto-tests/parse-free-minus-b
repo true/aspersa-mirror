@@ -1,0 +1,17 @@
+#!/bin/bash
+#parse_free_minus_b
+
+cat <<EOF > $1
+       Total | 3.89G
+        Free | 1.42G
+        Used | 2.47G physical + 0.00k swap = 2.47G virtual
+     Buffers | 131.84M
+      Caches | 1.92G
+EOF
+
+cat <<EOF > $2
+             total       used       free     shared    buffers     cached
+Mem:    4182048768 2653696000 1528352768          0  138240000 2060787712
+-/+ buffers/cache:  454668288 3727380480
+Swap:   5284814848          0 5284814848
+EOF
