@@ -459,9 +459,13 @@ main () {
    name_val "Current date" "`date -u +'%F %T UTC'` (local TZ: `date +'%Z %z'`)"
    name_val "Hostname" `uname -n`
    name_val "Uptime" "`uptime | cut -dp -f2 | cut -c2-`"
-   system=$(dmidecode -s system-product-name 2>/dev/null);
-   if [ "${system}" ]; then
-      name_val "System" "${system}";
+   vendor="$(dmidecode -s system-manufacturer 2>/dev/null | sed 's/ *$//g')"
+   if [ "${vendor}" ]; then
+      product="$(dmidecode -s system-product-name | sed 's/ *$//g')"
+      version="$(dmidecode -s system-version | sed 's/ *$//g')"
+      chassis="$(dmidecode -s chassis-type | sed 's/ *$//g')"
+      system="${vendor} ${product} v${version} (${chassis})"
+      name_val "System" "${system%%[ ]}";
    fi
 
    # Try to find all sorts of different files that say what the release is.
