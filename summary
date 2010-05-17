@@ -478,6 +478,22 @@ parse_lsi_megaraid_virtual_devices () {
 }
 
 # ##############################################################################
+# Simplifies vmstat and aligns it nicely.  We don't need the memory stats, the
+# system activity is enough.
+# ##############################################################################
+format_vmstat () {
+   awk '
+      /procs/ {
+         print  "  procs  ---swap-- -----io---- ---system---- -----cpu------";
+      }
+      $0 !~ /procs/ {
+         printf "  %2s %2s  %4s %4s %5s %5s %6s %6s %2s %2s %2s %2s %2s\n",
+            $1, $2, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17;
+      }
+   ' /tmp/aspersa
+}
+
+# ##############################################################################
 # The main() function is called at the end of the script.  This makes it
 # testable.  Major bits of parsing are separated into functions for testability.
 # As a general rule, we cannot 'cp' files from /proc, because they might be
@@ -626,6 +642,7 @@ main () {
    # TODO: if the controller is megaraid but we can't execute the MegaSAS tool,
    # then try grepping dmesg for the following and outputting that:
    #grep -A20 'scanning.*logical drives' /tmp/aspersa | grep 'Vendor:\|Type:'
+   # or, look at megarc -AdpBbuCmd -GetBbuStatus -aALL
 
    # ########################################################################
    # Virtualization
@@ -653,13 +670,15 @@ main () {
    section Top_Processes
    top -bn 1 | sed -e 's# *$##g' -e '/./{H;$!d;}' -e 'x;/PID/!d;' | head 
 
-   # TODO vmstat 5 5 | grep '[0-9]'
+   section "Simplified_vmstat_(wait_please)"
+   vmstat 1 5 > /tmp/aspersa
+   format_vmstat
+
    # TODO:   /proc/sys/net/ipv4/ip_local_port_range
    # TODO:   /proc/sys/net/ipv4/tcp_fin_timeout
    # netstat -antp | grep 3306 | awk '{print $5}' | cut -d: -f1 | sort | uniq -c |
    # sort -rn
    # ifconfig # //check for errors//
-   # megarc -AdpBbuCmd -GetBbuStatus -aALL
 
    # ########################################################################
    # All done.  Signal the end so it's explicit.
