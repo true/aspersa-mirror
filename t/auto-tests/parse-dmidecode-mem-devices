@@ -2,10 +2,10 @@
 #parse_dmidecode_mem_devices
 
 cat <<EOF > $1
-       DIMMs |     Size    Speed Form Factor Type       Type Detail
-             | ======== ======== =========== ========== ===========
-                2048 MB  800 MHz SODIMM      Other      Synchronous
-                2048 MB  800 MHz SODIMM      Other      Synchronous
+  Locator Size     Speed            Form Factor   Type          Type Detail
+  ======= ======== ================ ============= ============= ===========
+  SODIMM0 2048 MB  800 MHz          SODIMM        Other         Synchronous
+  SODIMM1 2048 MB  800 MHz          SODIMM        Other         Synchronous
 EOF
 
 cat <<EOF > $2

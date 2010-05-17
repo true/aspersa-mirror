@@ -180,20 +180,28 @@ parse_free_minus_b () {
 }
 
 # ##############################################################################
-# Parse the output of 'dmidecode', which should be stored in /tmp/aspersa.
+# Parse memory devices from the output of 'dmidecode', which should be stored in
+# /tmp/aspersa.
 # ##############################################################################
 parse_dmidecode_mem_devices () {
-   name_val DIMMs "    Size    Speed Form Factor Type       Type Detail"
-   name_val ""    "======== ======== =========== ========== ==========="
+   echo "  Locator Size     Speed            Form Factor   Type          Type Detail"
+   echo "  ======= ======== ================ ============= ============= ==========="
    # Print paragraphs containing 'Memory Device\n', extract the desired bits,
-   # concatenate them into one long line, then format as a table.
+   # concatenate them into one long line, then format as a table.  The data
+   # comes out in this order for each paragraph:
+   # $2  Size         2048 MB
+   # $3  Form Factor  <OUT OF SPEC>
+   # $4  Locator      DIMM1 
+   # $5  Type         <OUT OF SPEC>
+   # $6  Type Detail  Synchronous
+   # $7  Speed        667 MHz (1.5 ns)
    sed    -e '/./{H;$!d;}' \
           -e 'x;/Memory Device\n/!d;' \
           -e 's/: /:/g' \
        /tmp/aspersa \
-       | awk -F: '/Size|Type|Form.Factor|Type.Detail/{printf("|%s", $2)}/Speed/{print "|" $2}' \
+       | awk -F: '/Size|Type|Form.Factor|Type.Detail|[^ ]Locator/{printf("|%s", $2)}/Speed/{print "|" $2}' \
        | sort \
-       | awk -F'|' '{printf("%23s %8s %-11s %-10s %8s\n", $2, $6, $3, $4, $5);}'
+       | awk -F'|' '{printf("  %-7s %-8s %-16s %-13s %-13s %8s\n", $4, $2, $7, $3, $5, $6);}'
 }
 
 # ##############################################################################
