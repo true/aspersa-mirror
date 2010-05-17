@@ -334,7 +334,7 @@ parse_lsi_megaraid_bbu_status () {
 }
 
 # ##############################################################################
-# Parse physial devices from the output (saved in /tmp/aspersa) of
+# Parse physical devices from the output (saved in /tmp/aspersa) of
 # /opt/MegaRAID/MegaCli/MegaCli64 -LdPdInfo -aALL
 # OR, it will also work with the output of
 # /opt/MegaRAID/MegaCli/MegaCli64 -PDList -aALL 
@@ -574,6 +574,13 @@ main () {
       if [ -x /opt/MegaRAID/MegaCli/MegaCli64 ]; then
          if /opt/MegaRAID/MegaCli/MegaCli64 -AdpAllInfo -aALL > /tmp/aspersa; then
             parse_lsi_megaraid_adapter_info
+         fi
+         if /opt/MegaRAID/MegaCli/MegaCli64 -AdpBbuCmd -GetBbuStatus -aALL > /tmp/aspersa; then
+            parse_lsi_megaraid_bbu_status
+         fi
+         if /opt/MegaRAID/MegaCli/MegaCli64 -LdPdInfo -aALL > /tmp/aspersa; then
+            parse_lsi_megaraid_virtual_devices
+            parse_lsi_megaraid_devices
          fi
       fi
    fi
