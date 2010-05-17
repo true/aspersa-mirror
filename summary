@@ -595,6 +595,8 @@ main () {
    dmesg | grep '^scsi[0-9]' > /tmp/aspersa
    if grep -qi ': .*megaraid' /tmp/aspersa; then
       controller='LSI Logic MegaRAID'
+   elif grep -q ': LSISAS[0-9]' /tmp/aspersa; then
+      controller='Fusion-MPT'
    elif grep -q ': aacraid' /tmp/aspersa; then
       controller='AACRAID'
    elif grep -q ': 3ware [0-9]* Storage Controller' /tmp/aspersa; then
