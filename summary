@@ -201,8 +201,36 @@ parse_dmidecode_mem_devices () {
 # /tmp/aspersa.
 # ##############################################################################
 parse_filesystems () {
-   echo "  Filesystem                    Size Used Type  Opts          Mountpoint";
-   awk '{printf "  %-30s%4s%5s %-5s %-13s %s\n", $1, $2, $5, $10, $11, $6}' /tmp/aspersa
+   # Filesystem names and mountpoints can be very long.  We try to align things
+   # as nicely as possible by making columns only as wide as needed.  This
+   # requires two passes through the file.  The first pass finds the max size of
+   # these columns and prints out a printf spec, and the second prints out the
+   # file nicely aligned.
+   spec="$(awk '
+      BEGIN {
+         f=0;
+         m=0;
+      }
+      /./ {
+         if ( length($1) > f ) {
+            f=length($1);
+         }
+         if ( length($11) > m ) {
+            m=length($11);
+         }
+      }
+      END{
+         print "%-" f "s %4s %4s %-5s %-" m "s %s";
+      }
+   ' /tmp/aspersa)";
+   awk "
+      BEGIN {
+         spec=\"  ${spec}\n\";
+         printf spec, \"Filesystem\", \"Size\", \"Used\", \"Type\", \"Opts\", \"Mountpoint\";
+      }
+      {
+         printf spec, \$1, \$2, \$5, \$10, \$11, \$6
+      }" /tmp/aspersa
 }
 
 # ##############################################################################

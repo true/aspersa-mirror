@@ -14,7 +14,7 @@ GL_result="/tmp/aspersa-result"
 # - argument 1 is the file to which the reference result should be printed
 # - argument 2 is the file to which the input should be printed
 
-for GL_file in `ls auto-tests`; do
+for GL_file in `ls auto-tests | sort -R`; do
    GL_file="auto-tests/${GL_file}"
 
    # Get the command to run

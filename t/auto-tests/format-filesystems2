@@ -1,0 +1,17 @@
+#!/bin/bash
+#parse_filesystems
+
+cat <<EOF > $1
+  Filesystem                         Size Used Type  Opts Mountpoint
+  /dev/mapper/VolGroup00-LogVol00     62G  56% ext3  (rw) /
+  /dev/mapper/VolGroup01-MySQLData00  67G  20% ext3  (rw) /var/lib/mysql
+  /dev/sda3                          190M  11% ext3  (rw) /boot
+  tmpfs                              7.9G   0% tmpfs (rw) /dev/shm
+EOF
+
+cat <<EOF > $2
+/dev/mapper/VolGroup00-LogVol00 62G 33G 26G 56% / on / type ext3 (rw)
+/dev/mapper/VolGroup01-MySQLData00 67G 13G 52G 20% /var/lib/mysql on /var/lib/mysql type ext3 (rw)
+/dev/sda3 190M 20M 161M 11% /boot on /boot type ext3 (rw)
+tmpfs 7.9G 0 7.9G 0% /dev/shm on /dev/shm type tmpfs (rw)
+EOF
