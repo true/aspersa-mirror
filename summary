@@ -587,6 +587,7 @@ main () {
    # Disks, RAID, Filesystems
    # ########################################################################
    # TODO: Add info about software RAID
+   # TODO: add info about /proc/sys/fs/file-max
    section "Mounted_Filesystems"
    join <(df -hP|sort) <(mount|sort) > /tmp/aspersa
    parse_filesystems
