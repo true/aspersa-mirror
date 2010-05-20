@@ -1,19 +1,19 @@
-#!/usr/bin/awk
-
 BEGIN {
    cnt = 0;
    sum = 0;
    i   = 0;
-   printf "%15s %12s %6s %12s %12s\n", "Time", "Total", "Count", "Avg", "1-Min Avg";
+   #printf "%15s %12s %6s %12s %12s %12s %12s\n", "Time", "Total", "Count", "Avg", "1-Min Avg", "1-Min StDev", "Sigma";
 }
 /^# Time: / {
    sums[i] = sum;
    cnts[i] = cnt;
    cnt60 = 0;
    sum60 = 0;
+   sumsq = 0;
    for (j in cnts) {
       cnt60 += cnts[j];
       sum60 += sums[j];
+      sumsq += sums[j] * sums[j];
    }
    if ( cnt > 0 ) {
       avg = sum / cnt;
@@ -23,11 +23,21 @@ BEGIN {
    }
    if ( cnt60 > 0 ) {
       avg60 = sum60 / cnt60;
+      # One-pass standard deviation algorithm: the stdev is the sqrt of the variance, which is the sum of 
+      # the squares of the differences from the mean; but we can also do it as this:
+      # variance = (sum of the squares) / n - (mean^2)
+      var60 = (sumsq / cnt60) - (avg60 * avg60);
+      stdev = sqrt(var60);
+      delta = avg > avg60 ? avg - avg60 : avg60 - avg;
+      sigma = delta / stdev;
    }
    else {
       avg60 = 0;
+      stdev = 0;
+      sigma = 0;
    }
-   printf "%6s %8s %12.6f %6d %12.6f %12.6f\n", $3, $4, sum, cnt, avg, avg60;
+
+   printf("%6s %8s %12.6f %6d %12.6f %12.6f %12.6f %12.6f\n", $3, $4, sum, cnt, avg, avg60, stdev, sigma) > "/var/tmp/mysql-log-stats.txt";
    i++;
    if ( i >= 60 ) {
       i = 0;
@@ -39,3 +49,4 @@ BEGIN {
    cnt++;
    sum += $3;
 }
+
