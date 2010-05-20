@@ -1,52 +1,68 @@
-BEGIN {
-   cnt = 0;
-   sum = 0;
-   i   = 0;
-   #printf "%15s %12s %6s %12s %12s %12s %12s\n", "Time", "Total", "Count", "Avg", "1-Min Avg", "1-Min StDev", "Sigma";
-}
-/^# Time: / {
-   sums[i] = sum;
-   cnts[i] = cnt;
-   cnt60 = 0;
-   sum60 = 0;
-   sumsq = 0;
-   for (j in cnts) {
-      cnt60 += cnts[j];
-      sum60 += sums[j];
-      sumsq += sums[j] * sums[j];
-   }
-   if ( cnt > 0 ) {
-      avg = sum / cnt;
-   }
-   else {
-      cur = 0;
-   }
-   if ( cnt60 > 0 ) {
-      avg60 = sum60 / cnt60;
-      # One-pass standard deviation algorithm: the stdev is the sqrt of the variance, which is the sum of 
-      # the squares of the differences from the mean; but we can also do it as this:
-      # variance = (sum of the squares) / n - (mean^2)
-      var60 = (sumsq / cnt60) - (avg60 * avg60);
-      stdev = sqrt(var60);
-      delta = avg > avg60 ? avg - avg60 : avg60 - avg;
-      sigma = delta / stdev;
-   }
-   else {
-      avg60 = 0;
-      stdev = 0;
-      sigma = 0;
-   }
+#!/usr/bin/perl
 
-   printf("%6s %8s %12.6f %6d %12.6f %12.6f %12.6f %12.6f\n", $3, $4, sum, cnt, avg, avg60, stdev, sigma) > "/var/tmp/mysql-log-stats.txt";
-   i++;
-   if ( i >= 60 ) {
-      i = 0;
-   }
-   cnt = 0;
-   sum = 0;
-}
-/^# Query_time/ {
-   cnt++;
-   sum += $3;
-}
+use strict;
+use warnings FATAL => 'all';
+use English qw(-no_match_vars);
 
+my $avg = 0;
+my $cnt = 0;
+my $sum = 0;
+my $i   = 0;
+printf "%15s %12s %6s %12s %12s %12s %12s\n", "Time", "Total", "Count", "Avg", "1-Min Avg", "1-Min StDev", "Sigma";
+
+open FH, "tail -f $ARGV[0] |" or die $OS_ERROR;
+
+my @sums = map { 0 } (0..59);
+my @cnts = @sums;
+my ($cnt60, $sum60, $avg60, $var60, $stdev, $delta, $sumsq, $sigma);
+
+while (my $line = <FH> ) {
+   chomp $line;
+   if ( my ($ts) = $line =~ m/^# Time: ([ 0-9:]{15})/ ) {
+
+      $sums[$i] = $sum;
+      $cnts[$i] = $cnt;
+      $cnt60 = 0;
+      $sum60 = 0;
+      $sumsq = 0;
+      foreach my $j ( 0 .. $#cnts ) {
+         $cnt60 += $cnts[$j];
+         $sum60 += $sums[$j];
+         $sumsq += $sums[$j] * $sums[$j];
+      }
+      if ( $cnt > 0 ) {
+         $avg = $sum / $cnt;
+      }
+      else {
+         $avg = 0;
+      }
+      if ( $cnt60 > 0 ) {
+         $avg60 = $sum60 / $cnt60;
+         # One-pass standard deviation algorithm: the stdev is the sqrt of the variance, which is the sum of 
+         # the squares of the differences from the mean; but we can also do it as this:
+         # variance = (sum of the squares) / n - (mean^2)
+         $var60 = ($sumsq / $cnt60) - ($avg60 * $avg60);
+         $stdev = sqrt($var60);
+         $delta = $avg > $avg60 ? $avg - $avg60 : $avg60 - $avg;
+         $sigma = $delta / $stdev;
+      }
+      else {
+         $avg60 = 0;
+         $stdev = 0;
+         $sigma = 0;
+      }
+
+      open my $out, '>', $ARGV[1] or die $OS_ERROR;
+      printf $out "%15s %12.6f %6d %12.6f %12.6f %12.6f %12.6f\n", $ts, $sum, $cnt, $avg, $avg60, $stdev, $sigma;
+      $i++;
+      if ( $i >= 60 ) {
+         $i = 0;
+      }
+      $cnt = 0;
+      $sum = 0;
+   }
+   if ( my ($time) = $line =~ m/^# Query_time: (\S+)/ ) {
+      $cnt++;
+      $sum += $time;
+   }
+}
