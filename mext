@@ -12,7 +12,9 @@ usage() {
    echo "Example: 'mext -r -- mysqladmin ext -i10 -c3'"
    echo "You can also work with data from a file:"
    echo "Example: 'mext -r -- cat mysqladmin-output.txt'"
-   echo "If this doesn't work on your system, maybe mext2 will help"
+   echo "If this throws an error, try bash instead of sh, and submit a bug "
+   echo "report to bug 24.  We need a reproducible test case."
+   echo "If getopts doesn't work on your system, maybe mext2 will help"
    exit 1
 }
 
