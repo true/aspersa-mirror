@@ -250,6 +250,14 @@ parse_raid_controller_dmesg () {
 }
 
 # ##############################################################################
+# Parse the output of "hpacucli ctrl all show config", which should be stored in
+# /tmp/aspersa
+# ##############################################################################
+parse_hpaculi () {
+   grep 'logicaldrive\|physicaldrive' /tmp/aspersa
+}
+
+# ##############################################################################
 # Parse the output of arcconf, which should be stored in /tmp/aspersa
 # ##############################################################################
 parse_arcconf () {
@@ -511,8 +519,11 @@ format_vmstat () {
 main () {
 
    # Begin by setting the $PATH to include some common locations that are not
-   # always in the $PATH.
-   export PATH="${PATH}:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin"
+   # always in the $PATH, including the "sbin" locations, and some common
+   # locations for proprietary management software, such as RAID controllers.
+   export PATH="${PATH}:/usr/local/bin:/usr/bin:/bin"
+   export PATH="${PATH}:/usr/local/sbin:/usr/sbin:/sbin"
+   export PATH="${PATH}:/usr/StorMan/:/opt/MegaRAID/MegaCli/";
 
    # Set up temporary files.
    temp_files "check"
@@ -625,9 +636,11 @@ main () {
 
    section "RAID_Controller"
 
+   # ########################################################################
    # We look in dmesg for RAID controller information first, because it's often
    # available to non-root users.  It's most reliable to look at /var/log/dmesg
    # if possible.  TODO: look at lspci next.
+   # ########################################################################
    cat /var/log/dmesg > /tmp/aspersa 2>/dev/null
    if [ ! -s /tmp/aspersa ]; then
       dmesg > /tmp/aspersa 2>/dev/null
@@ -636,22 +649,30 @@ main () {
 
    name_val Controller "${controller:-No RAID controller detected}"
 
+   # ########################################################################
+   # Attempt to get, parse, and print RAID controller status from possibly
+   # proprietary management software.  Any executables that are normally stored
+   # in a weird location, such as /usr/StorMan/arcconf, should have their
+   # location added to $PATH at the beginning of main().
+   # ########################################################################
    if [ "${controller}" = "AACRAID" ]; then
-      if /usr/StorMan/arcconf getconfig 1 > /tmp/aspersa; then
+      if arcconf getconfig 1 > /tmp/aspersa 2>/dev/null; then
          parse_arcconf
       fi
+   elif [ "${controller}" = "HP Smart Array" ]; then
+      if hpacucli ctrl all show config > /tmp/aspersa 2>/dev/null; then
+         parse_hpaculi
+      fi
    elif [ "${controller}" = "LSI Logic MegaRAID" ]; then
-      if [ -x /opt/MegaRAID/MegaCli/MegaCli64 ]; then
-         if /opt/MegaRAID/MegaCli/MegaCli64 -AdpAllInfo -aALL > /tmp/aspersa; then
-            parse_lsi_megaraid_adapter_info
-         fi
-         if /opt/MegaRAID/MegaCli/MegaCli64 -AdpBbuCmd -GetBbuStatus -aALL > /tmp/aspersa; then
-            parse_lsi_megaraid_bbu_status
-         fi
-         if /opt/MegaRAID/MegaCli/MegaCli64 -LdPdInfo -aALL > /tmp/aspersa; then
-            parse_lsi_megaraid_virtual_devices
-            parse_lsi_megaraid_devices
-         fi
+      if MegaCli64 -AdpAllInfo -aALL > /tmp/aspersa 2>/dev/null; then
+         parse_lsi_megaraid_adapter_info
+      fi
+      if MegaCli64 -AdpBbuCmd -GetBbuStatus -aALL > /tmp/aspersa 2>/dev/null; then
+         parse_lsi_megaraid_bbu_status
+      fi
+      if MegaCli64 -LdPdInfo -aALL > /tmp/aspersa 2>/dev/null; then
+         parse_lsi_megaraid_virtual_devices
+         parse_lsi_megaraid_devices
       fi
    fi
 
