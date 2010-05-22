@@ -711,12 +711,6 @@ main () {
    vmstat 1 5 > /tmp/aspersa
    format_vmstat
 
-   # TODO:   /proc/sys/net/ipv4/ip_local_port_range
-   # TODO:   /proc/sys/net/ipv4/tcp_fin_timeout
-   # netstat -antp | grep 3306 | awk '{print $5}' | cut -d: -f1 | sort | uniq -c |
-   # sort -rn
-   # ifconfig # //check for errors//
-
    # ########################################################################
    # All done.  Signal the end so it's explicit.
    # ########################################################################
