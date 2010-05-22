@@ -501,6 +501,12 @@ format_vmstat () {
 # 'cat' works okay.
 # ##############################################################################
 main () {
+
+   # Begin by setting the $PATH to include some common locations that are not
+   # always in the $PATH.
+   export PATH="${PATH}:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin"
+
+   # Set up temporary files.
    temp_files "check"
    temp_files "touch"
    section Aspersa_System_Summary_Report
