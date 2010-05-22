@@ -589,7 +589,8 @@ main () {
    # TODO: Add info about software RAID
    # TODO: add info about /proc/sys/fs/file-max
    section "Mounted_Filesystems"
-   join <(df -hP|sort) <(mount|sort) > /tmp/aspersa
+   df -hP | sort > /tmp/aspersa2
+   mount | sort | join /tmp/aspersa2 - > /tmp/aspersa
    parse_filesystems
 
    section "Disk_Schedulers_And_Queue_Size"
