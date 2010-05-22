@@ -233,6 +233,23 @@ parse_filesystems () {
 }
 
 # ##############################################################################
+# Parse the output of dmesg, which should be in /tmp/aspersa, and detect RAID
+# controllers.
+# ##############################################################################
+parse_raid_controller_dmesg () {
+   pat='scsi[0-9].*: .*'
+   if grep -qi "${pat}megaraid" /tmp/aspersa; then
+      echo 'LSI Logic MegaRAID'
+   elif grep -q "${pat}LSISAS[0-9]" /tmp/aspersa; then
+      echo 'Fusion-MPT'
+   elif grep -q "${pat}aacraid" /tmp/aspersa; then
+      echo 'AACRAID'
+   elif grep -q "${pat}3ware [0-9]* Storage Controller" /tmp/aspersa; then
+      echo '3Ware'
+   fi
+}
+
+# ##############################################################################
 # Parse the output of arcconf, which should be stored in /tmp/aspersa
 # ##############################################################################
 parse_arcconf () {
@@ -608,17 +625,15 @@ main () {
 
    section "RAID_Controller"
 
-   # TODO: look for /var/log/dmesg first.
-   dmesg | grep '^scsi[0-9]' > /tmp/aspersa
-   if grep -qi ': .*megaraid' /tmp/aspersa; then
-      controller='LSI Logic MegaRAID'
-   elif grep -q ': LSISAS[0-9]' /tmp/aspersa; then
-      controller='Fusion-MPT'
-   elif grep -q ': aacraid' /tmp/aspersa; then
-      controller='AACRAID'
-   elif grep -q ': 3ware [0-9]* Storage Controller' /tmp/aspersa; then
-      controller='3Ware'
+   # We look in dmesg for RAID controller information first, because it's often
+   # available to non-root users.  It's most reliable to look at /var/log/dmesg
+   # if possible.  TODO: look at lspci next.
+   cat /var/log/dmesg > /tmp/aspersa 2>/dev/null
+   if [ ! -s /tmp/aspersa ]; then
+      dmesg > /tmp/aspersa 2>/dev/null
    fi
+   controller="$(parse_raid_controller_dmesg)"
+
    name_val Controller "${controller:-No RAID controller detected}"
 
    if [ "${controller}" = "AACRAID" ]; then

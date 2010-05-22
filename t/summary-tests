@@ -43,3 +43,5 @@ for GL_file in `ls auto-tests | sort -R`; do
    # Clean up
    rm -f /tmp/aspersa*
 done
+
+echo "#### DONE ####"
