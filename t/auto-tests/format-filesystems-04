@@ -1,0 +1,23 @@
+#!/bin/bash
+#parse_filesystems
+
+cat <<EOF > $1
+  Filesystem Size Used Type        Opts                Mountpoint
+  /dev/sda1  9.9G  34% ext3        (rw)                /
+  /dev/sdb   414G   1% ext3        (rw)                /mnt
+  none       7.6G   0% devpts      (rw,gid=5,mode=620) /dev/shm
+  none       7.6G   0% tmpfs       (rw)                /dev/shm
+  none       7.6G   0% binfmt_misc (rw)                /dev/shm
+  none       7.6G   0% proc        (rw)                /dev/shm
+  none       7.6G   0% sysfs       (rw)                /dev/shm
+EOF
+
+cat <<EOF > $2
+/dev/sda1 9.9G 3.2G 6.2G 34% / on / type ext3 (rw)
+/dev/sdb 414G 199M 393G 1% /mnt on /mnt type ext3 (rw)
+none 7.6G 0 7.6G 0% /dev/shm on /dev/pts type devpts (rw,gid=5,mode=620)
+none 7.6G 0 7.6G 0% /dev/shm on /dev/shm type tmpfs (rw)
+none 7.6G 0 7.6G 0% /dev/shm on /proc/sys/fs/binfmt_misc type binfmt_misc (rw)
+none 7.6G 0 7.6G 0% /dev/shm on /proc type proc (rw)
+none 7.6G 0 7.6G 0% /dev/shm on /sys type sysfs (rw)
+EOF

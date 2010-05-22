@@ -210,6 +210,7 @@ parse_filesystems () {
       BEGIN {
          f=10;
          m=0;
+         t=0;
       }
       /./ {
          if ( length($1) > f ) {
@@ -218,9 +219,12 @@ parse_filesystems () {
          if ( length($11) > m ) {
             m=length($11);
          }
+         if ( length($10) > t ) {
+            t=length($10);
+         }
       }
       END{
-         print "%-" f "s %4s %4s %-5s %-" m "s %s";
+         print "%-" f "s %4s %4s %-" t "s %-" m "s %s";
       }
    ' /tmp/aspersa)";
    awk "
