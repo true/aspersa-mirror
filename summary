@@ -54,15 +54,6 @@ name_val() {
    printf "%12s | %s\n" "$1" "$2"
 }
 
-# Get the right-hand text from a line with a colon in the middle, such as the
-# output from /usr/StorMan/arcconf.  Parameters:
-# $1 = pattern to match in the line
-# $2 = file to search in
-# $3 = variable to export the result to.
-get_keyval () {
-   export "$3"=$(sed -n -e "/$1/{s#^.*: *##;s#  *#_#g;p}" "$2")
-}
-
 # Converts a value to units of power of 2. Stores the result into a variable
 # with the name you specify.  Usage: shorten $value 'variable_name'
 shorten() {
