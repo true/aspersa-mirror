@@ -1,0 +1,13 @@
+Attached devices:
+Host: scsi0 Channel: 00 Id: 32 Lun: 00
+  Vendor: DP       Model: BACKPLANE        Rev: 1.05
+  Type:   Enclosure                        ANSI  SCSI revision: 05
+Host: scsi0 Channel: 02 Id: 00 Lun: 00
+  Vendor: DELL     Model: PERC 6/i         Rev: 1.11
+  Type:   Direct-Access                    ANSI  SCSI revision: 05
+Host: scsi0 Channel: 02 Id: 01 Lun: 00
+  Vendor: DELL     Model: PERC 6/i         Rev: 1.11
+  Type:   Direct-Access                    ANSI  SCSI revision: 05
+Host: scsi1 Channel: 00 Id: 00 Lun: 00
+  Vendor: TEAC     Model: DVD-ROM DV28EV   Rev: D.AE
+  Type:   CD-ROM                           ANSI  SCSI revision: 05
