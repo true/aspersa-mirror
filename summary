@@ -361,14 +361,16 @@ parse_arcconf () {
          }
          END {
             for ( device in devicenames ) {
-               printf("  %-10s %-7s %-13s %-7s %-12s %-11s %-7s\n",
-                  devices[device ",isa"],
-                  devices[device ",state"],
-                  devices[device ",speed"],
-                  devices[device ",vendor"],
-                  devices[device ",model"],
-                  devices[device ",size"],
-                  devices[device ",cache"]);
+               if ( devices[device ",isa"] ~ /Hard drive/ ) {
+                  printf("  %-10s %-7s %-13s %-7s %-12s %-11s %-7s\n",
+                     devices[device ",isa"],
+                     devices[device ",state"],
+                     devices[device ",speed"],
+                     devices[device ",vendor"],
+                     devices[device ",model"],
+                     devices[device ",size"],
+                     devices[device ",cache"]);
+               }
             }
          }'
 
