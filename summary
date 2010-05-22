@@ -233,15 +233,33 @@ parse_filesystems () {
 }
 
 # ##############################################################################
+# Parse the output of lspci, which should be in /tmp/aspersa, and detect RAID
+# controllers.
+# ##############################################################################
+parse_raid_controller_lspci () {
+   if grep -q "RAID bus controller: LSI Logic / Symbios Logic MegaRAID SAS" /tmp/aspersa; then
+      echo 'LSI Logic MegaRAID SAS'
+   elif grep -q "Fusion-MPT SAS" /tmp/aspersa; then
+      echo 'Fusion-MPT SAS'
+   elif grep -q "RAID bus controller: LSI Logic / Symbios Logic Unknown" /tmp/aspersa; then
+      echo 'LSI Logic Unknown'
+   elif grep -q "RAID bus controller: Adaptec AAC-RAID" /tmp/aspersa; then
+      echo 'AACRAID'
+   elif grep -q "${pat}3ware [0-9]* Storage Controller" /tmp/aspersa; then
+      echo '3Ware'
+   fi
+}
+
+# ##############################################################################
 # Parse the output of dmesg, which should be in /tmp/aspersa, and detect RAID
 # controllers.
 # ##############################################################################
 parse_raid_controller_dmesg () {
    pat='scsi[0-9].*: .*'
    if grep -qi "${pat}megaraid" /tmp/aspersa; then
-      echo 'LSI Logic MegaRAID'
-   elif grep -q "${pat}LSISAS[0-9]" /tmp/aspersa; then
-      echo 'Fusion-MPT'
+      echo 'LSI Logic MegaRAID SAS'
+   elif grep -q "Fusion MPT SAS" /tmp/aspersa; then
+      echo 'Fusion-MPT SAS'
    elif grep -q "${pat}aacraid" /tmp/aspersa; then
       echo 'AACRAID'
    elif grep -q "${pat}3ware [0-9]* Storage Controller" /tmp/aspersa; then
@@ -639,13 +657,18 @@ main () {
    # ########################################################################
    # We look in dmesg for RAID controller information first, because it's often
    # available to non-root users.  It's most reliable to look at /var/log/dmesg
-   # if possible.  TODO: look at lspci next.
+   # if possible.
    # ########################################################################
-   cat /var/log/dmesg > /tmp/aspersa 2>/dev/null
-   if [ ! -s /tmp/aspersa ]; then
-      dmesg > /tmp/aspersa 2>/dev/null
+   if lspci > /tmp/aspersa 2>/dev/null; then
+      controller="$(parse_raid_controller_lspci)"
    fi
-   controller="$(parse_raid_controller_dmesg)"
+   if [ -z "${controller}" ]; then
+      cat /var/log/dmesg > /tmp/aspersa 2>/dev/null
+      if [ ! -s /tmp/aspersa ]; then
+         dmesg > /tmp/aspersa 2>/dev/null
+      fi
+      controller="$(parse_raid_controller_dmesg)"
+   fi
 
    name_val Controller "${controller:-No RAID controller detected}"
 
@@ -663,7 +686,7 @@ main () {
       if hpacucli ctrl all show config > /tmp/aspersa 2>/dev/null; then
          parse_hpaculi
       fi
-   elif [ "${controller}" = "LSI Logic MegaRAID" ]; then
+   elif [ "${controller}" = "LSI Logic MegaRAID SAS" ]; then
       if MegaCli64 -AdpAllInfo -aALL > /tmp/aspersa 2>/dev/null; then
          parse_lsi_megaraid_adapter_info
       fi
