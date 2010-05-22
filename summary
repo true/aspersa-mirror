@@ -594,8 +594,10 @@ main () {
 
    section "Disk_Schedulers_And_Queue_Size"
 
-   for disk in /sys/block/[h,s]d*; do
-      name_val "$(basename ${disk})" "$(cat ${disk}/queue/scheduler | grep -o '\[.*\]') $(cat ${disk}/queue/nr_requests)"
+   for disk in $(ls /sys/block/ | grep -v ram | grep -v loop); do
+      if [ -e "/sys/block/${disk}/queue/scheduler" ]; then
+         name_val "${disk}" "$(cat /sys/block/${disk}/queue/scheduler | grep -o '\[.*\]') $(cat /sys/block/${disk}/queue/nr_requests)"
+      fi
    done
 
    section "LVM_Volumes"
