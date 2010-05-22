@@ -207,7 +207,7 @@ parse_filesystems () {
    # file nicely aligned.
    spec="$(awk '
       BEGIN {
-         f=0;
+         f=10;
          m=0;
       }
       /./ {
