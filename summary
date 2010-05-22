@@ -377,6 +377,15 @@ parse_arcconf () {
 }
 
 # ##############################################################################
+# Parse the output of "lsiutil -i -s" from /tmp/aspersa
+# ##############################################################################
+parse_fusionmpt_lsiutil () {
+   echo
+   awk '/LSI.*Firmware/ { print " ", $0 }' /tmp/aspersa
+   grep . /tmp/aspersa | sed -n -e '/B___T___L/,$ {s/^/  /; p}'
+}
+
+# ##############################################################################
 # Parse the output of MegaCli64 -AdpAllInfo -aALL from /tmp/aspersa.
 # ##############################################################################
 parse_lsi_megaraid_adapter_info () {
