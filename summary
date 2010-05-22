@@ -234,6 +234,30 @@ parse_filesystems () {
 }
 
 # ##############################################################################
+# Parse the output of dmesg, which should be in /tmp/aspersa, and detect
+# virtualization.
+# ##############################################################################
+parse_virtualization_dmesg () {
+   if grep -qi vmware /tmp/aspersa; then
+      echo "VMWare";
+   elif grep -qi vmxnet /tmp/aspersa; then
+      echo "VMWare";
+   elif grep -qi 'paravirtualized kernel on vmi' /tmp/aspersa; then
+      echo "VMWare";
+   elif grep -qi 'paravirtualized kernel on xen' /tmp/aspersa; then
+      echo "Xen";
+   elif grep -qi qemu /tmp/aspersa; then
+      echo "QEmu";
+   elif grep -qi 'paravirtualized kernel on KVM' /tmp/aspersa; then
+      echo "KVM";
+   elif grep -qi 'hd.: Virtual .., ATA.*drive' /tmp/aspersa; then
+      echo "Microsoft VirtualPC";
+   elif grep -qi 'Xen virtual console' /tmp/aspersa; then
+      echo "Xen";
+   fi
+}
+
+# ##############################################################################
 # Parse the output of lspci, which should be in /tmp/aspersa, and detect RAID
 # controllers.
 # ##############################################################################
@@ -667,9 +691,9 @@ main () {
    section "RAID_Controller"
 
    # ########################################################################
-   # We look in dmesg for RAID controller information first, because it's often
-   # available to non-root users.  It's most reliable to look at /var/log/dmesg
-   # if possible.
+   # We look in lspci first because it's more reliable, then dmesg, because it's
+   # often available to non-root users.  It's most reliable to look at
+   # /var/log/dmesg if possible.
    # ########################################################################
    if lspci > /tmp/aspersa 2>/dev/null; then
       controller="$(parse_raid_controller_lspci)"
@@ -717,21 +741,27 @@ main () {
    # or, look at megarc -AdpBbuCmd -GetBbuStatus -aALL
 
    # ########################################################################
-   # Virtualization
+   # We look in dmesg for virtualization information first, because it's often
+   # available to non-root users and usually has telltale signs.  It's most
+   # reliable to look at /var/log/dmesg if possible.  There are a number of
+   # other ways to find out if a system is virtualized.
    # ########################################################################
    section Virtualization
-
-   lspci > /tmp/aspersa
-   if grep -qi virtualbox /tmp/aspersa; then
-      virt=VirtualBox
-   elif grep -qi vmware /tmp/aspersa; then
-      virt=VMWare
-   elif [ -e /proc/user_beancounters ]; then
-      virt="OpenVZ/Virtuozzo"
-   else
-      dmesg > /tmp/aspersa
-      if grep -qi vmware /tmp/aspersa; then
+   cat /var/log/dmesg > /tmp/aspersa 2>/dev/null
+   if [ ! -s /tmp/aspersa ]; then
+      dmesg > /tmp/aspersa 2>/dev/null
+   fi
+   if [ -s /tmp/aspersa ]; then
+      virt="$(parse_virtualization_dmesg)"
+   fi
+   if [ -z "${virt}" ]; then
+      lspci > /tmp/aspersa
+      if grep -qi virtualbox /tmp/aspersa; then
          virt=VirtualBox
+      elif grep -qi vmware /tmp/aspersa; then
+         virt=VMWare
+      elif [ -e /proc/user_beancounters ]; then
+         virt="OpenVZ/Virtuozzo"
       fi
    fi
    name_val Technology "${virt:-No virtualization detected}"
