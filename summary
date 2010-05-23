@@ -579,7 +579,7 @@ main () {
    # Begin by setting the $PATH to include some common locations that are not
    # always in the $PATH, including the "sbin" locations, and some common
    # locations for proprietary management software, such as RAID controllers.
-   export PATH="${PATH}:/usr/local/bin:/usr/bin:/bin"
+   export PATH="${PATH}:/usr/local/bin:/usr/bin:/bin:/usr/libexec"
    export PATH="${PATH}:/usr/local/sbin:/usr/sbin:/sbin"
    export PATH="${PATH}:/usr/StorMan/:/opt/MegaRAID/MegaCli/";
 
