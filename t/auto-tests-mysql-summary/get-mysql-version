@@ -2,7 +2,7 @@
 #get_mysql_version
 
 cat <<EOF > $1
-5.0.51a-24+lenny2 (Debian), compiled on debian-linux-gnu i486
+5.0.51a-24+lenny2 (Debian), built on debian-linux-gnu i486
 EOF
 
 cp samples/mysql-variables-001.txt /tmp/aspersa-mysql-variables

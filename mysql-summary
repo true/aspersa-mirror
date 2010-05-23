@@ -90,6 +90,33 @@ get_mysql_status () {
    awk "\$1 ~ /^$1$/ { print \$2 }" /tmp/aspersa-mysql-status
 }
 
+# Does fuzzy rounding: rounds to nearest interval, but the interval gets larger
+# as the number gets larger.  This is to make things easier to diff.
+fuzz () {
+   echo $1 | awk '{
+      printf "%d", ($1 <= 10 ? $1 : $1 <= 50 ? sprintf("%.0f", $1 / 5) * 5 : $1 <= 100 ?  sprintf("%.0f", $1 / 10) * 10 : $1 <= 250 ? sprintf("%.0f", $1 / 25) * 25 : $1 <= 500 ? sprintf("%.0f", $1 / 50) * 50 : sprintf("%.0f", $1 / 100) * 100);
+   }'
+}
+
+# ##############################################################################
+# Functions for parsing specific files and getting desired info from them.
+# These are called from within main() and are separated so they can be tested
+# easily.  The calling convention is that the data they need to run is prepared
+# first by putting it into /tmp/aspersa.  Then code that's testing just needs to
+# put sample data into /tmp/aspersa and call it.
+# ##############################################################################
+
+# Parses the output of 'ps -eaf | grep mysqld' which should be in /tmp/aspersa.
+parse_mysqld_instances () {
+   echo "  Port  Data Directory  Socket"
+   echo "  ===== =============== ======"
+   # Put the datadir, port, socket, and pid into that order at the front of line
+   sed -e 's/^\(.*\)--socket=\([^ ]*\)/\2 \1/' \
+      -e 's/^\(.*\)--port=\([0-9]*\)/\2 \1/' \
+      -e 's/^\(.*\)--datadir=\([^ ]*\)/\2 \1/' /tmp/aspersa \
+      | awk '/\/mysqld / { printf "  %5d %-15s %s\n", $2, $1, $3 }'
+}
+
 # Gets the MySQL system time.  Uses input from /tmp/aspersa-mysql-variables.
 get_mysql_timezone () {
    tz="$(get_mysql_variable time_zone)"
@@ -102,7 +129,7 @@ get_mysql_timezone () {
 # Gets the MySQL system version.  Uses input from /tmp/aspersa-mysql-variables.
 get_mysql_version () {
    ver="$(get_mysql_variable version) $(get_mysql_variable version_comment)"
-   ver="${ver}, compiled on $(get_mysql_variable version_compile_os)"
+   ver="${ver}, built on $(get_mysql_variable version_compile_os)"
    ver="${ver} $(get_mysql_variable version_compile_machine)"
    echo "${ver}"
 }
@@ -113,14 +140,6 @@ get_mysql_uptime () {
    uptime="$(secs_to_time ${uptime})"
    echo "${uptime}"
 }
-
-# ##############################################################################
-# Functions for parsing specific files and getting desired info from them.
-# These are called from within main() and are separated so they can be tested
-# easily.  The calling convention is that the data they need to run is prepared
-# first by putting it into /tmp/aspersa.  Then code that's testing just needs to
-# put sample data into /tmp/aspersa and call it.
-# ##############################################################################
 
 # ##############################################################################
 # The main() function is called at the end of the script.  This makes it
@@ -141,23 +160,47 @@ main () {
    # Set up temporary files.
    temp_files "check"
    temp_files "touch"
+
+   # ########################################################################
+   # Header for the whole thing, table of discovered instances
+   # ########################################################################
    section Aspersa_MySQL_Summary_Report
+   name_val "System time" "`date -u +'%F %T UTC'` (local TZ: `date +'%Z %z'`)"
+   section Instances
+   ps -eaf | grep mysqld > /tmp/aspersa
+   parse_mysqld_instances
 
    # ########################################################################
    # Fetch some basic info so we can start
    # ########################################################################
    mysql -ss -e 'SHOW /*!40100 GLOBAL*/ VARIABLES' $* > /tmp/aspersa-mysql-variables
+   if [ "$?" != "0" ]; then
+      echo "Cannot connect to mysql, please specify command-line options"
+      exit 1
+   fi
    mysql -ss -e 'SHOW /*!50000 GLOBAL*/ STATUS' $* > /tmp/aspersa-mysql-status
+   mysql -ss -e 'SHOW DATABASES' $* > /tmp/aspersa-mysql-databases
+   mysql -ssE -e 'SHOW SLAVE STATUS' $* > /tmp/aspersa-mysql-slave
+   mysql -ssE -e 'SHOW FULL PROCESSLIST' $* > /tmp/aspersa-mysql-processlist
    now="$(mysql -ss -e 'SELECT NOW()' $*)"
+   port="$(get_mysql_variable port)"
 
    # ########################################################################
    # General date, hostname, etc
    # ########################################################################
-   name_val "System time" "`date -u +'%F %T UTC'` (local TZ: `date +'%Z %z'`)"
-   name_val "Time" "${now} ($(get_mysql_timezone))"
-   name_val "Hostname" "$(get_mysql_variable hostname)"
-   name_val "Version" "$(get_mysql_version)"
-   name_val "Uptime" "$(get_mysql_uptime)"
+   section "Report_On_Port_${port}"
+   name_val Time "${now} ($(get_mysql_timezone))"
+   name_val Hostname "$(get_mysql_variable hostname)"
+   name_val Version "$(get_mysql_version)"
+   # TODO: add in when-restarted, in mysqld's time?
+   name_val Uptime "$(get_mysql_uptime)"
+   name_val Databases "$(wc -l /tmp/aspersa-mysql-databases | cut -d' ' -f1)"
+   procs="$(get_mysql_status Threads_connected)"
+   procr="$(get_mysql_status Threads_running)"
+   name_val Processes "$(fuzz ${procs}) connected, $(fuzz ${procr}) running"
+   if [ -s /tmp/aspersa-mysql-slave ]; then slave=""; else slave="not "; fi
+   slavecount=$(grep -c 'Binlog Dump' /tmp/aspersa-mysql-processlist)
+   name_val Replication "Is ${slave}a slave, has ${slavecount} slaves connected"
 
    temp_files "rm"
 }
