@@ -1,0 +1,167 @@
+#!/bin/bash
+# This program is part of Aspersa (http://code.google.com/p/aspersa/)
+
+# ########################################################################
+# A script to summarize MySQL information in a nice way.
+# Goals: work well on Linux; create a compact diff-able report that is
+# easy to paste into a wiki or email, and easy to scan and compare too.
+#
+# Author: Baron Schwartz
+# ########################################################################
+
+# ########################################################################
+# Globals, helper functions
+# ########################################################################
+
+# The temp files are for storing working results so we don't call commands many
+# times (gives inconsistent results, maybe adds load on things I don't want to
+# such as RAID controllers).  They must not exist -- if they did, someone would
+# symlink them to /etc/passwd and then run this program as root.  Call this
+# function with "check", "rm", or "touch" as an argument.
+temp_files() {
+   for file in /tmp/aspersa{,-mysql-variables,-mysql-status}; do
+      case "$1" in
+      check)
+         if [ -e "${file}" ]; then
+            echo "For security reasons, ${file} must not exist.";
+            exit 1;
+         fi
+         ;;
+      touch)
+         if ! touch "${file}"; then
+            echo "I can't make my temp file ${file}";
+            exit 1;
+         fi
+         ;;
+      rm)
+         rm -f "${file}"
+         ;;
+      esac
+   done
+}
+
+# Print a space-padded string into $line.  Then translate spaces to hashes, and
+# underscores to spaces.  End result is a line of hashes with words at the
+# start.
+section () {
+   line="$(printf '#_%-60s' "$1_")"
+   line="${line// /#}"
+   printf "%s\n" "${line//_/ }"
+}
+
+# Print a "name | value" line.
+name_val() {
+   printf "%12s | %s\n" "$1" "$2"
+}
+
+# Converts a value to units of power of 2. Stores the result into a variable
+# with the name you specify.  Usage: shorten $value 'variable_name'
+shorten() {
+   unit=k
+   size=1024
+   if [ $1 -ge 1099511627776 ] ; then
+      size=1099511627776
+      unit=T
+   elif [ $1 -ge 1073741824 ] ; then
+      size=1073741824
+      unit=G
+   elif [ $1 -ge 1048576 ] ; then
+      size=1048576
+      unit=M
+   fi
+   result=$(echo "$1 $size" | awk '{printf "%.2f", $1 / $2}')
+   export "$2"="$result$unit"
+}
+
+# Accepts a number of seconds, and outputs a d+h:m:s formatted string
+secs_to_time () {
+   echo "$1" | awk '{
+      printf( "%d+%02d:%02d:%02d", $1 / 86400, ($1 % 86400) / 3600, ($1 % 3600) / 60, $1 % 60);
+   }'
+}
+
+# gets a value from /tmp/aspersa-mysql-variables.
+get_mysql_variable () {
+   awk "\$1 ~ /^$1$/ { print \$2 }" /tmp/aspersa-mysql-variables
+}
+
+# gets a value from /tmp/aspersa-mysql-status.
+get_mysql_status () {
+   awk "\$1 ~ /^$1$/ { print \$2 }" /tmp/aspersa-mysql-status
+}
+
+# Gets the MySQL system time.  Uses input from /tmp/aspersa-mysql-variables.
+get_mysql_timezone () {
+   tz="$(get_mysql_variable time_zone)"
+   if [ "${tz}" = "SYSTEM" ]; then
+      tz="$(get_mysql_variable system_time_zone)"
+   fi
+   echo "${tz}"
+}
+
+# Gets the MySQL system version.  Uses input from /tmp/aspersa-mysql-variables.
+get_mysql_version () {
+   ver="$(get_mysql_variable version) $(get_mysql_variable version_comment)"
+   ver="${ver}, compiled on $(get_mysql_variable version_compile_os)"
+   ver="${ver} $(get_mysql_variable version_compile_machine)"
+   echo "${ver}"
+}
+
+# Gets the system uptime in human readable format.
+get_mysql_uptime () {
+   uptime="$(get_mysql_status Uptime)"
+   uptime="$(secs_to_time ${uptime})"
+   echo "${uptime}"
+}
+
+# ##############################################################################
+# Functions for parsing specific files and getting desired info from them.
+# These are called from within main() and are separated so they can be tested
+# easily.  The calling convention is that the data they need to run is prepared
+# first by putting it into /tmp/aspersa.  Then code that's testing just needs to
+# put sample data into /tmp/aspersa and call it.
+# ##############################################################################
+
+# ##############################################################################
+# The main() function is called at the end of the script.  This makes it
+# testable.  Major bits of parsing are separated into functions for testability.
+# As a general rule, we cannot 'cp' files from /proc, because they might be
+# empty afterwards.  (I've seen 'cp /proc/cpuinfo' create an empty file.)  But
+# 'cat' works okay.
+# ##############################################################################
+main () {
+
+   # Begin by setting the $PATH to include some common locations that are not
+   # always in the $PATH, including the "sbin" locations, and some common
+   # locations for proprietary management software, such as RAID controllers.
+   export PATH="${PATH}:/usr/local/bin:/usr/bin:/bin:/usr/libexec"
+   export PATH="${PATH}:/usr/local/sbin:/usr/sbin:/sbin"
+   export PATH="${PATH}:/usr/StorMan/:/opt/MegaRAID/MegaCli/";
+
+   # Set up temporary files.
+   temp_files "check"
+   temp_files "touch"
+   section Aspersa_MySQL_Summary_Report
+
+   # ########################################################################
+   # Fetch some basic info so we can start
+   # ########################################################################
+   mysql -ss -e 'SHOW /*!40100 GLOBAL*/ VARIABLES' $* > /tmp/aspersa-mysql-variables
+   mysql -ss -e 'SHOW /*!50000 GLOBAL*/ STATUS' $* > /tmp/aspersa-mysql-status
+   now="$(mysql -ss -e 'SELECT NOW()' $*)"
+
+   # ########################################################################
+   # General date, hostname, etc
+   # ########################################################################
+   name_val "System time" "`date -u +'%F %T UTC'` (local TZ: `date +'%Z %z'`)"
+   name_val "Time" "${now} ($(get_mysql_timezone))"
+   name_val "Hostname" "$(get_mysql_variable hostname)"
+   name_val "Version" "$(get_mysql_version)"
+   name_val "Uptime" "$(get_mysql_uptime)"
+
+   temp_files "rm"
+}
+
+# Execute the program if it was not included from another file.  This makes it
+# possible to include without executing, and thus test.
+if [ $(basename "$0") = "mysql-summary" ]; then main $*; fi
