@@ -5,6 +5,9 @@
 # A script to summarize MySQL information in a nice way.
 # Goals: work well on Linux; create a compact diff-able report that is
 # easy to paste into a wiki or email, and easy to scan and compare too.
+# 
+# To use, simply execute it.  Optionally add the same command-line options
+# you would use to connect to MySQL, such as "./summary-mysql --user=foo"
 #
 # Author: Baron Schwartz
 # ########################################################################
@@ -175,7 +178,8 @@ main () {
    # ########################################################################
    mysql -ss -e 'SHOW /*!40100 GLOBAL*/ VARIABLES' $* > /tmp/aspersa-mysql-variables
    if [ "$?" != "0" ]; then
-      echo "Cannot connect to mysql, please specify command-line options"
+      echo "Cannot connect to mysql, please specify command-line options."
+      temp_files "rm"
       exit 1
    fi
    mysql -ss -e 'SHOW /*!50000 GLOBAL*/ STATUS' $* > /tmp/aspersa-mysql-status
@@ -201,6 +205,51 @@ main () {
    if [ -s /tmp/aspersa-mysql-slave ]; then slave=""; else slave="not "; fi
    slavecount=$(grep -c 'Binlog Dump' /tmp/aspersa-mysql-processlist)
    name_val Replication "Is ${slave}a slave, has ${slavecount} slaves connected"
+
+# Status: all time & last 10 seconds
+#  -  QPS, bytes/sec, queries that do a sort per second, number that do a temp
+#     table per second, temp table on disk per second
+#  -  temp tables & files
+#  -  read/write ratio
+#  -  Select_* types
+#  -  top 5 Com, then "others"
+#  -  connections, threads, cached threads, aborted, max_connections, max_used
+#  -  Handler operations
+#  -  Table cache: size, %full, tables opened per second
+#  -  query cache: size, %full, hit/select, insert/hit ratio
+# InnoDB: version, buffer pool size, %full, %dirty, log size, log write rate,
+#   flush method, flush_logs_at_trx_commit, page size, ratio of row and page
+#   read/write/etc, #trx, longest trx, #lock waits, #semaphore/mutex waits,
+#   purge lag, history list length, #purge thread, #IO threads, io capacity,
+#   main thread state, pending io, checkpoint lag, queries in queue, thread
+#   concurrency, file_per_table, tx_isolation
+# MyISAM: key cache size, %full, blocks unflushed, 
+# Processlist: count/sum(time)/max(time) per status, Info, hostnames, users, db,
+# command
+# Users: count, number with blank password, is anonymous enabled, is
+# old_passwords enabled
+# Databases: show DBs and numbers of views, funcs, tables, sps, triggers in each
+# Databases: show DBs and a table of engines (count of tables) per each engine
+# Databsese: show DBs and a table of index types
+# show open tables: show top 5 tables open
+# Binary logging: in use, total size, N files of zero size, expire_logs_days,
+# filters, innodb_support_xa, sync_binlog
+# Replication: seconds behind, running, filters, skip_slave_start, skip_errors,
+# read_only, temp tables open, slave_net_timeout
+#-  show technologies in use: fulltext indexing, geospatial indexing, delayed
+#   insert, prepared statements, temp tables, SSL, stored procedures, handlers,
+#   explicit LOCK TABLES (Com_lock), xa transactions, NDB
+#   (Ndb_cluster_node_id)
+#-  show data types in use, and a count(*) of the number of columns
+#-  noteworthy variables: auto_inc offset, flush_time, init_connect, init_file,
+#   innodb_checksums/doublewrite, commit concurrency, concurrency tickets,
+#   join_buffer_size, sort_buffer_size, max_heap_table_size, read_buffer_size,
+#   read_rnd_buffer_size, server_id, sql_mode    
+#
+#debian:~# mysqldump --all-databases --no-data --loose-skip-comments
+#--skip-add-locks --skip-add-drop-table --compact --skip-lock-all-tables
+#--skip-lock-tables --skip-set-charset | head
+#
 
    temp_files "rm"
 }
