@@ -197,6 +197,56 @@ parse_dmidecode_mem_devices () {
 }
 
 # ##############################################################################
+# Parse the output of 'netstat -antp' which should be in /tmp/aspersa.
+# ##############################################################################
+parse_ip_s_link () {
+   echo "  interface  rx_bytes rx_packets  rx_errors   tx_bytes tx_packets  tx_errors"
+   echo "  ========= ========= ========== ========== ========== ========== =========="
+
+   awk '/^[1-9][0-9]*:/ {
+      save["iface"] = substr($2, 0, index($2, ":") - 1);
+      new = 1;
+   }
+   $0 !~ /[^0-9 ]/ {
+      if ( new == 1 ) {
+         new = 0;
+         save["bytes"] = $1;
+         save["packs"] = $2;
+         save["errs"]  = $3;
+      }
+      else {
+         printf "  %-8s %10d %10d %10d %10d %10d %10d\n", save["iface"], save["bytes"], save["packs"], save["errs"], $1, $2, $3;
+      }
+   }' /tmp/aspersa
+}
+
+# ##############################################################################
+# Parse the output of 'netstat -antp' which should be in /tmp/aspersa.
+# ##############################################################################
+parse_netstat () {
+   echo "  Connections from remote IP addresses"
+   awk '$1 ~ /^tcp/ && $5 ~ /^[1-9]/ {
+      print substr($5, 0, index($5, ":") - 1);
+   }' /tmp/aspersa | sort | uniq -c \
+      | awk '{printf "    %-15s %5d\n", $2, $1}' | sort -V
+   echo "  Connections to local IP addresses"
+   awk '$1 ~ /^tcp/ && $5 ~ /^[1-9]/ {
+      print substr($4, 0, index($4, ":") - 1);
+   }' /tmp/aspersa | sort | uniq -c \
+      | awk '{printf "    %-15s %5d\n", $2, $1}' | sort -V
+   echo "  Connections to top 10 local ports"
+   awk '$1 ~ /^tcp/ && $5 ~ /^[1-9]/ {
+      print substr($4, index($4, ":") + 1);
+   }' /tmp/aspersa | sort | uniq -c | sort -rn | head -n10 \
+      | awk '{printf "    %-15s %5d\n", $2, $1}' | sort
+   echo "  States of connections"
+   awk '$1 ~ /^tcp/ {
+      print $6;
+   }' /tmp/aspersa | sort | uniq -c | sort -rn \
+      | awk '{printf "    %-15s %5d\n", $2, $1}' | sort
+}
+
+# ##############################################################################
 # Parse the joined output of 'mount' and 'df -hP', which should be stored in
 # /tmp/aspersa.
 # ##############################################################################
@@ -259,6 +309,16 @@ parse_virtualization_dmesg () {
    elif grep -qi 'Xen virtual console' /tmp/aspersa; then
       echo "Xen";
    fi
+}
+
+# ##############################################################################
+# Parse the output of lspci, which should be in /tmp/aspersa, and detect
+# Ethernet cards.
+# ##############################################################################
+parse_ethernet_controller_lspci () {
+   grep -i ethernet /tmp/aspersa | cut -d: -f3 | while read line; do
+      name_val Controller "${line}"
+   done
 }
 
 # ##############################################################################
@@ -739,11 +799,6 @@ main () {
       fi
    fi
 
-   # TODO: if the controller is megaraid but we can't execute the MegaSAS tool,
-   # then try grepping dmesg for the following and outputting that:
-   #grep -A20 'scanning.*logical drives' /tmp/aspersa | grep 'Vendor:\|Type:'
-   # or, look at megarc -AdpBbuCmd -GetBbuStatus -aALL
-
    # ########################################################################
    # We look in dmesg for virtualization information first, because it's often
    # available to non-root users and usually has telltale signs.  It's most
@@ -759,7 +814,7 @@ main () {
       virt="$(parse_virtualization_dmesg)"
    fi
    if [ -z "${virt}" ]; then
-      lspci > /tmp/aspersa
+      lspci > /tmp/aspersa 2>/dev/null
       if grep -qi virtualbox /tmp/aspersa; then
          virt=VirtualBox
       elif grep -qi vmware /tmp/aspersa; then
@@ -771,11 +826,32 @@ main () {
    name_val Technology "${virt:-No virtualization detected}"
 
    # ########################################################################
+   # Network stuff
+   # ########################################################################
+   section Network_Config
+   if lspci > /tmp/aspersa 2>/dev/null; then
+      parse_ethernet_controller_lspci
+   fi
+   if sysctl net.ipv4.tcp_fin_timeout > /dev/null 2>&1; then
+      name_val "FIN Timeout" "$(sysctl net.ipv4.tcp_fin_timeout)"
+      name_val "Port Range" "$(sysctl net.ipv4.ip_local_port_range)"
+   fi
+
+   section Interface_Statistics
+   if ip -s link > /tmp/aspersa 2>/dev/null; then
+      parse_ip_s_link
+   fi
+
+   section Network_Connections
+   if netstat -antp > /tmp/aspersa 2>/dev/null; then
+      parse_netstat
+   fi
+
+   # ########################################################################
    # Processes, load, etc
    # ########################################################################
    section Top_Processes
-   top -bn 1 | sed -e 's# *$##g' -e '/./{H;$!d;}' -e 'x;/PID/!d;' | head 
-
+   top -bn 1 | sed -e 's# *$##g' -e '/./{H;$!d;}' -e 'x;/PID/!d;' | grep . | head 
    section "Simplified_vmstat_(wait_please)"
    vmstat 1 5 > /tmp/aspersa
    format_vmstat

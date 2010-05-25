@@ -1,0 +1,13 @@
+#!/bin/bash
+#parse_ip_s_link
+
+cat <<EOF > $1
+  interface  rx_bytes rx_packets  rx_errors   tx_bytes tx_packets  tx_errors
+  ========= ========= ========== ========== ========== ========== ==========
+  lo       3672252213  341949241          0 3672252213  341949241          0
+  eth0     1863567224 1242160956          0 3414253990  711297408          0
+  eth1     1174170824   55543521          0  949719203   52996911          0
+  sit0              0          0          0          0          0          0
+EOF
+
+cat samples/ip-s-link-002.txt > $2

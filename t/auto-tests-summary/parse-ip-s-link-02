@@ -1,0 +1,13 @@
+#!/bin/bash
+#parse_ip_s_link
+
+cat <<EOF > $1
+  interface  rx_bytes rx_packets  rx_errors   tx_bytes tx_packets  tx_errors
+  ========= ========= ========== ========== ========== ========== ==========
+  lo          3246978      26907          0    3246978      26907          0
+  eth0      176275034   28646545          0  117557001     880398          0
+  wlan0      49106414      81338          0   19024970      94127          0
+  vboxnet0          0          0          0          0          0          0
+EOF
+
+cat samples/ip-s-link-001.txt > $2
