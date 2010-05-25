@@ -228,12 +228,14 @@ parse_netstat () {
    awk '$1 ~ /^tcp/ && $5 ~ /^[1-9]/ {
       print substr($5, 0, index($5, ":") - 1);
    }' /tmp/aspersa | sort | uniq -c \
-      | awk '{printf "    %-15s %5d\n", $2, $1}' | sort -V
+      | awk '{printf "    %-15s %5d\n", $2, $1}' \
+      | sort -n -t . -k 1,1 -k 2,2 -k 3,3 -k 4,4
    echo "  Connections to local IP addresses"
    awk '$1 ~ /^tcp/ && $5 ~ /^[1-9]/ {
       print substr($4, 0, index($4, ":") - 1);
    }' /tmp/aspersa | sort | uniq -c \
-      | awk '{printf "    %-15s %5d\n", $2, $1}' | sort -V
+      | awk '{printf "    %-15s %5d\n", $2, $1}' \
+      | sort -n -t . -k 1,1 -k 2,2 -k 3,3 -k 4,4
    echo "  Connections to top 10 local ports"
    awk '$1 ~ /^tcp/ && $5 ~ /^[1-9]/ {
       print substr($4, index($4, ":") + 1);
