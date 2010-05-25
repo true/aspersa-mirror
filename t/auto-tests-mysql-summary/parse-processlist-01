@@ -1,0 +1,60 @@
+#!/bin/bash
+#summarize_processlist
+
+cat <<EOF > $1
+
+  Command                                    COUNT(*) SUM(Time) MAX(Time)
+  ========================================== ======== ========= =========
+  Binlog Dump                                       1   9133994   9133994
+  Connect                                           2   5553511   5245903
+  Query                                             2         0         0
+  Sleep                                           162    156553     19968
+
+  User                                       COUNT(*) SUM(Time) MAX(Time)
+  ========================================== ======== ========= =========
+  acjcxx                                            4       852       486
+  aecac                                             1      1476      1476
+  babeecc                                          21     26931      4968
+  centous                                           2       107       107
+  crcpcpc                                           2         0         0
+  crgcp4c                                           3         0         0
+  eanecj                                           32      5588       508
+  ebace                                            11    110522     19968
+  etace                                            78      8323       508
+  goate                                             8      1366       406
+  qjveec                                            1      1388      1388
+  repl                                              1   9133994   9133994
+  root                                              1         0         0
+  system user                                       2   5553511   5245903
+
+  Host                                       COUNT(*) SUM(Time) MAX(Time)
+  ========================================== ======== ========= =========
+  10.14.82.196                                      6         0         0
+  10.14.82.202                                     21     26931      4968
+  10.17.85.100                                      9      2842      1476
+  10.17.85.74                                       1   9133994   9133994
+  10.17.85.86                                      37      7649       508
+  10.17.85.88                                       5       509       221
+  10.17.85.90                                      11    110522     19968
+  10.36.34.66                                      34      3906       372
+                                                    2   5553511   5245903
+  localhost                                         1         0         0
+  someserver.woozle.com11                           1      1388      1388
+  someserver.woozle.com14                           1       107       107
+  someserver.woozle.com                            38      2699       294
+
+  db                                         COUNT(*) SUM(Time) MAX(Time)
+  ========================================== ======== ========= =========
+  aetecjc                                         163    156553     19968
+  NULL                                              4  14687505   9133994
+
+  State                                      COUNT(*) SUM(Time) MAX(Time)
+  ========================================== ======== ========= =========
+                                                  162    156553     19968
+  Has read all relay log; waiting for the s         1    307608    307608
+  Has sent all binlog to slave; waiting for         1   9133994   9133994
+  NULL                                              2         0         0
+  Waiting for master to send event                  1   5245903   5245903
+EOF
+
+cp samples/processlist-001.txt /tmp/aspersa-mysql-processlist

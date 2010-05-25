@@ -144,6 +144,42 @@ get_mysql_uptime () {
    echo "${uptime}"
 }
 
+# Slices the processlist a bunch of different ways.  Uses input from
+# /tmp/aspersa-mysql-processlist
+summarize_processlist () {
+   for param in Command User Host db State; do
+      echo
+      printf '  %-42s %8s %9s %9s\n' \
+         "${param}" "COUNT(*)" "SUM(Time)" "MAX(Time)"
+      echo "  ==========================================" \
+         "======== ========= ========="
+      awk "
+         \$1 == \"${param}:\" {
+            p = substr(\$0, index(\$0, \":\") + 2);
+            if ( index(p, \":\") > 0 ) {
+               p = substr(p, 0, index(p, \":\"));
+            }
+            if ( length(p) > 42 ) {
+               p = substr(p, 0, 42);
+            }
+         }
+         \$1 == \"Time:\" {
+            t = \$2;
+         }
+         \$1 == \"Info:\" {
+            count[p]++;
+            time[p] += t;
+            mtime[p] = t > mtime[p] ? t : mtime[p];
+         }
+         END {
+            for ( p in count ) {
+               printf \"  %-42s %8d %9d %9d\n\", p, count[p], time[p], mtime[p];
+            }
+         }
+      " /tmp/aspersa-mysql-processlist | sort
+   done
+}
+
 # ##############################################################################
 # The main() function is called at the end of the script.  This makes it
 # testable.  Major bits of parsing are separated into functions for testability.
@@ -206,6 +242,12 @@ main () {
    slavecount=$(grep -c 'Binlog Dump' /tmp/aspersa-mysql-processlist)
    name_val Replication "Is ${slave}a slave, has ${slavecount} slaves connected"
 
+
+   section Processlist
+   summarize_processlist
+
+# Processlist: count/sum(time)/max(time) per status, Info, hostnames, users, db,
+# command
 # Status: all time & last 10 seconds
 #  -  QPS, bytes/sec, queries that do a sort per second, number that do a temp
 #     table per second, temp table on disk per second
@@ -217,6 +259,15 @@ main () {
 #  -  Handler operations
 #  -  Table cache: size, %full, tables opened per second
 #  -  query cache: size, %full, hit/select, insert/hit ratio
+# show open tables: show top 5 tables open
+# Databases: show DBs and numbers of views, funcs, tables, sps, triggers in each
+# A table of engines (count of tables) per each engine, ignoring the mysql db
+#-  show data types in use, and a count(*) of the number of columns
+# Table of index types, ignoring mysql db
+#-  show technologies in use: fulltext indexing, geospatial indexing, delayed
+#   insert, prepared statements, temp tables, SSL, stored procedures, handlers,
+#   explicit LOCK TABLES (Com_lock), xa transactions, NDB
+#   (Ndb_cluster_node_id)
 # InnoDB: version, buffer pool size, %full, %dirty, log size, log write rate,
 #   flush method, flush_logs_at_trx_commit, page size, ratio of row and page
 #   read/write/etc, #trx, longest trx, #lock waits, #semaphore/mutex waits,
@@ -224,23 +275,12 @@ main () {
 #   main thread state, pending io, checkpoint lag, queries in queue, thread
 #   concurrency, file_per_table, tx_isolation
 # MyISAM: key cache size, %full, blocks unflushed, 
-# Processlist: count/sum(time)/max(time) per status, Info, hostnames, users, db,
-# command
 # Users: count, number with blank password, is anonymous enabled, is
 # old_passwords enabled
-# Databases: show DBs and numbers of views, funcs, tables, sps, triggers in each
-# Databases: show DBs and a table of engines (count of tables) per each engine
-# Databsese: show DBs and a table of index types
-# show open tables: show top 5 tables open
 # Binary logging: in use, total size, N files of zero size, expire_logs_days,
 # filters, innodb_support_xa, sync_binlog
 # Replication: seconds behind, running, filters, skip_slave_start, skip_errors,
 # read_only, temp tables open, slave_net_timeout
-#-  show technologies in use: fulltext indexing, geospatial indexing, delayed
-#   insert, prepared statements, temp tables, SSL, stored procedures, handlers,
-#   explicit LOCK TABLES (Com_lock), xa transactions, NDB
-#   (Ndb_cluster_node_id)
-#-  show data types in use, and a count(*) of the number of columns
 #-  noteworthy variables: auto_inc offset, flush_time, init_connect, init_file,
 #   innodb_checksums/doublewrite, commit concurrency, concurrency tickets,
 #   join_buffer_size, sort_buffer_size, max_heap_table_size, read_buffer_size,
