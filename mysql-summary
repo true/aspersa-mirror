@@ -22,7 +22,10 @@
 # symlink them to /etc/passwd and then run this program as root.  Call this
 # function with "check", "rm", or "touch" as an argument.
 temp_files() {
-   for file in /tmp/aspersa{,-mysql-variables,-mysql-status}; do
+   for file in /tmp/aspersa{,-mysql-variables,-mysql-status} \
+         /tmp/aspersa{,-mysql-databases,-mysql-processlist} \
+         /tmp/aspersa-mysql{dump,-slave};
+   do
       case "$1" in
       check)
          if [ -e "${file}" ]; then
@@ -439,7 +442,7 @@ main () {
    else
       name_val "SSL" No
    fi
-   if [ "$(get_stat Com_lock)" -gt 0 ]; then
+   if [ "$(get_stat Com_lock_tables)" -gt 0 ]; then
       name_val "Explicit LOCK TABLES" Yes
    else
       name_val "Explicit LOCK TABLES" No
