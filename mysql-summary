@@ -54,11 +54,10 @@ section () {
 
 # Print a "name | value" line.
 name_val() {
-   printf "%12s | %s\n" "$1" "$2"
+   printf "%20s | %s\n" "$1" "$2"
 }
 
-# Converts a value to units of power of 2. Stores the result into a variable
-# with the name you specify.  Usage: shorten $value 'variable_name'
+# Converts a value to units of power of 2.  Optional precision is $2.
 shorten() {
    unit=k
    size=1024
@@ -72,8 +71,8 @@ shorten() {
       size=1048576
       unit=M
    fi
-   result=$(echo "$1 $size" | awk '{printf "%.2f", $1 / $2}')
-   export "$2"="$result$unit"
+   result=$(echo "$1 $size ${2:-0}" | awk '{printf "%." $3 "f", $1 / $2}')
+   echo "${result}${unit}"
 }
 
 # Accepts a number of seconds, and outputs a d+h:m:s formatted string
@@ -84,12 +83,12 @@ secs_to_time () {
 }
 
 # gets a value from /tmp/aspersa-mysql-variables.
-get_mysql_variable () {
+get_var () {
    awk "\$1 ~ /^$1$/ { print \$2 }" /tmp/aspersa-mysql-variables
 }
 
 # gets a value from /tmp/aspersa-mysql-status.
-get_mysql_status () {
+get_stat () {
    awk "\$1 ~ /^$1$/ { print \$2 }" /tmp/aspersa-mysql-status
 }
 
@@ -99,6 +98,12 @@ fuzz () {
    echo $1 | awk '{
       printf "%d", ($1 <= 10 ? $1 : $1 <= 50 ? sprintf("%.0f", $1 / 5) * 5 : $1 <= 100 ?  sprintf("%.0f", $1 / 10) * 10 : $1 <= 250 ? sprintf("%.0f", $1 / 25) * 25 : $1 <= 500 ? sprintf("%.0f", $1 / 50) * 50 : sprintf("%.0f", $1 / 100) * 100);
    }'
+}
+
+# Fuzzy computes the percent that $1 is of $2
+fuzzy_pct () {
+   pct=$(echo $1 $2 | awk '{printf "%d", $1/$2*100}');
+   echo "$(fuzz ${pct})%"
 }
 
 # ##############################################################################
@@ -122,26 +127,38 @@ parse_mysqld_instances () {
 
 # Gets the MySQL system time.  Uses input from /tmp/aspersa-mysql-variables.
 get_mysql_timezone () {
-   tz="$(get_mysql_variable time_zone)"
+   tz="$(get_var time_zone)"
    if [ "${tz}" = "SYSTEM" ]; then
-      tz="$(get_mysql_variable system_time_zone)"
+      tz="$(get_var system_time_zone)"
    fi
    echo "${tz}"
 }
 
 # Gets the MySQL system version.  Uses input from /tmp/aspersa-mysql-variables.
 get_mysql_version () {
-   ver="$(get_mysql_variable version) $(get_mysql_variable version_comment)"
-   ver="${ver}, built on $(get_mysql_variable version_compile_os)"
-   ver="${ver} $(get_mysql_variable version_compile_machine)"
-   echo "${ver}"
+   name_val Version "$(get_var version) $(get_var version_comment)"
+   name_val "Built On" "$(get_var version_compile_os) $(get_var version_compile_machine)"
 }
 
 # Gets the system uptime in human readable format.
 get_mysql_uptime () {
-   uptime="$(get_mysql_status Uptime)"
+   uptime="$(get_stat Uptime)"
    uptime="$(secs_to_time ${uptime})"
    echo "${uptime}"
+}
+
+# Summarizes the output of SHOW MASTER LOGS, which is in /tmp/aspersa
+summarize_binlogs () {
+   name_val "Binlogs" $(wc -l /tmp/aspersa)
+   name_val "Zero-Sized" $(grep -c '\<0$' /tmp/aspersa)
+   size=$(awk '{t += $2} END{printf "%d\n", t}' /tmp/aspersa)
+   name_val "Total Size" $(shorten ${size})
+}
+
+# Print out binlog_do_db and binlog_ignore_db
+format_binlog_filters () {
+   name_val "binlog_do_db" $(cut -f3 /tmp/aspersa)
+   name_val "binlog_ignore_db" $(cut -f4 /tmp/aspersa)
 }
 
 # Slices the processlist a bunch of different ways.  Uses input from
@@ -149,18 +166,18 @@ get_mysql_uptime () {
 summarize_processlist () {
    for param in Command User Host db State; do
       echo
-      printf '  %-42s %8s %9s %9s\n' \
+      printf '  %-30s %8s %9s %9s\n' \
          "${param}" "COUNT(*)" "SUM(Time)" "MAX(Time)"
-      echo "  ==========================================" \
-         "======== ========= ========="
+      echo "  ------------------------------" \
+         "-------- --------- ---------"
       awk "
          \$1 == \"${param}:\" {
             p = substr(\$0, index(\$0, \":\") + 2);
             if ( index(p, \":\") > 0 ) {
                p = substr(p, 0, index(p, \":\"));
             }
-            if ( length(p) > 42 ) {
-               p = substr(p, 0, 42);
+            if ( length(p) > 30 ) {
+               p = substr(p, 0, 31);
             }
          }
          \$1 == \"Time:\" {
@@ -173,28 +190,117 @@ summarize_processlist () {
          }
          END {
             for ( p in count ) {
-               printf \"  %-42s %8d %9d %9d\n\", p, count[p], time[p], mtime[p];
+               printf \"  %-30s %8d %9d %9d\n\", p, count[p], time[p], mtime[p];
             }
          }
       " /tmp/aspersa-mysql-processlist | sort
    done
+   echo
+}
+
+# Summarizes SHOW OPEN TABLES, which should be in /tmp/aspersa
+format_open_tables () {
+   echo "  Top open tables                          CNT"
+   echo "  ---------------------------------------- ---"
+   sort -nr -k3,3 /tmp/aspersa | head -n5 \
+      | awk '{printf "  %-40s %3d\n", $1 "." $2, $3}'
+}
+
+# Summarizes per-database statistics for a bunch of different things: count of
+# tables, views, etc.  Data should be in /tmp/aspersa-mysqldump and /tmp/aspersa
+# gets overwritten.
+format_overall_db_stats () {
+   echo
+   # We keep counts of everything in an associative array keyed by db name, and
+   # what it is.
+   awk '
+      /^USE `.*`;$/ {
+         db = substr($2, 2, length($2) - 3);
+         dbs[db] = db;
+      }
+      /^CREATE TABLE/ {
+         counts[db ",tables"]++;
+      }
+      /CREATE ALGORITHM=/ {
+         counts[db ",views"]++;
+      }
+      /03 CREATE.*03 PROCEDURE/ {
+         counts[db ",sps"]++;
+      }
+      /03 CREATE.*03 FUNCTION/ {
+         counts[db ",func"]++;
+      }
+      /03 CREATE.*03 TRIGGER/ {
+         counts[db ",trg"]++;
+      }
+      END {
+         mdb = length("Database");
+         for ( db in dbs ) {
+            if ( length(db) > mdb ) {
+               mdb = length(db);
+            }
+         }
+         fmt = "  %-" mdb "s %6s %5s %3s %5s %5s\n";
+         printf fmt, "Database", "Tables", "Views", "SPs", "Trigs", "Funcs";
+         printf fmt, "--------", "------", "-----", "---", "-----", "-----";
+         for ( db in dbs ) {
+            printf fmt, db, counts[db ",tables"], counts[db ",views"], counts[db ",sps"], counts[db ",trg"], counts[db ",func"];
+         }
+      }
+   ' /tmp/aspersa-mysqldump > /tmp/aspersa
+   head -n2 /tmp/aspersa
+   tail -n+3 /tmp/aspersa | sort
+
+   echo
+   # Now do the summary of engines per DB
+   awk '
+      /^USE `.*`;$/ {
+         db = substr($2, 2, length($2) - 3);
+         dbs[db] = db;
+      }
+      /^\) ENGINE=/ {
+         engine=substr($2, index($2, "=") + 1);
+         engines[engine] = engine;
+         counts[db "," engine]++;
+      }
+      END {
+         mdb = length("Database");
+         for ( db in dbs ) {
+            if ( length(db) > mdb ) {
+               mdb = length(db);
+            }
+         }
+         fmt = "  %-" mdb "s"
+         printf fmt, "Database";
+         for ( engine in engines ) {
+            fmts[engine] = " %" length(engine) "s";
+            printf fmts[engine], engine;
+         }
+         print "";
+         for ( db in dbs ) {
+            printf fmt, db;
+            for ( engine in engines ) {
+               printf fmts[engine], counts[db "," engine];
+            }
+            print "";
+         }
+      }
+   ' /tmp/aspersa-mysqldump > /tmp/aspersa
+   head -n1 /tmp/aspersa
+   tail -n+2 /tmp/aspersa | sort
+   
 }
 
 # ##############################################################################
 # The main() function is called at the end of the script.  This makes it
 # testable.  Major bits of parsing are separated into functions for testability.
-# As a general rule, we cannot 'cp' files from /proc, because they might be
-# empty afterwards.  (I've seen 'cp /proc/cpuinfo' create an empty file.)  But
-# 'cat' works okay.
 # ##############################################################################
 main () {
 
    # Begin by setting the $PATH to include some common locations that are not
-   # always in the $PATH, including the "sbin" locations, and some common
-   # locations for proprietary management software, such as RAID controllers.
+   # always in the $PATH, including the "sbin" locations.
    export PATH="${PATH}:/usr/local/bin:/usr/bin:/bin:/usr/libexec"
    export PATH="${PATH}:/usr/local/sbin:/usr/sbin:/sbin"
-   export PATH="${PATH}:/usr/StorMan/:/opt/MegaRAID/MegaCli/";
 
    # Set up temporary files.
    temp_files "check"
@@ -223,73 +329,250 @@ main () {
    mysql -ssE -e 'SHOW SLAVE STATUS' $* > /tmp/aspersa-mysql-slave
    mysql -ssE -e 'SHOW FULL PROCESSLIST' $* > /tmp/aspersa-mysql-processlist
    now="$(mysql -ss -e 'SELECT NOW()' $*)"
-   port="$(get_mysql_variable port)"
+   port="$(get_var port)"
 
    # ########################################################################
    # General date, hostname, etc
    # ########################################################################
    section "Report_On_Port_${port}"
    name_val Time "${now} ($(get_mysql_timezone))"
-   name_val Hostname "$(get_mysql_variable hostname)"
-   name_val Version "$(get_mysql_version)"
+   name_val Hostname "$(get_var hostname)"
+   get_mysql_version
    # TODO: add in when-restarted, in mysqld's time?
    name_val Uptime "$(get_mysql_uptime)"
    name_val Databases "$(wc -l /tmp/aspersa-mysql-databases | cut -d' ' -f1)"
-   procs="$(get_mysql_status Threads_connected)"
-   procr="$(get_mysql_status Threads_running)"
+   procs="$(get_stat Threads_connected)"
+   procr="$(get_stat Threads_running)"
    name_val Processes "$(fuzz ${procs}) connected, $(fuzz ${procr}) running"
    if [ -s /tmp/aspersa-mysql-slave ]; then slave=""; else slave="not "; fi
    slavecount=$(grep -c 'Binlog Dump' /tmp/aspersa-mysql-processlist)
    name_val Replication "Is ${slave}a slave, has ${slavecount} slaves connected"
 
-
+   # ########################################################################
+   # Processlist, sliced several different ways
+   # ########################################################################
    section Processlist
    summarize_processlist
 
-# Processlist: count/sum(time)/max(time) per status, Info, hostnames, users, db,
-# command
-# Status: all time & last 10 seconds
-#  -  QPS, bytes/sec, queries that do a sort per second, number that do a temp
-#     table per second, temp table on disk per second
-#  -  temp tables & files
-#  -  read/write ratio
-#  -  Select_* types
-#  -  top 5 Com, then "others"
-#  -  connections, threads, cached threads, aborted, max_connections, max_used
-#  -  Handler operations
-#  -  Table cache: size, %full, tables opened per second
-#  -  query cache: size, %full, hit/select, insert/hit ratio
-# show open tables: show top 5 tables open
-# Databases: show DBs and numbers of views, funcs, tables, sps, triggers in each
-# A table of engines (count of tables) per each engine, ignoring the mysql db
-#-  show data types in use, and a count(*) of the number of columns
-# Table of index types, ignoring mysql db
-#-  show technologies in use: fulltext indexing, geospatial indexing, delayed
-#   insert, prepared statements, temp tables, SSL, stored procedures, handlers,
-#   explicit LOCK TABLES (Com_lock), xa transactions, NDB
-#   (Ndb_cluster_node_id)
-# InnoDB: version, buffer pool size, %full, %dirty, log size, log write rate,
-#   flush method, flush_logs_at_trx_commit, page size, ratio of row and page
-#   read/write/etc, #trx, longest trx, #lock waits, #semaphore/mutex waits,
-#   purge lag, history list length, #purge thread, #IO threads, io capacity,
-#   main thread state, pending io, checkpoint lag, queries in queue, thread
-#   concurrency, file_per_table, tx_isolation
-# MyISAM: key cache size, %full, blocks unflushed, 
-# Users: count, number with blank password, is anonymous enabled, is
-# old_passwords enabled
-# Binary logging: in use, total size, N files of zero size, expire_logs_days,
-# filters, innodb_support_xa, sync_binlog
+   # ########################################################################
+   # Queries and query plans
+   # ########################################################################
+
+   # Status: all time & last 10 seconds
+   #  -  QPS, bytes/sec, queries that do a sort per second, number that do a
+   #     temp table per second, temp table on disk per second
+   #  -  temp tables & files
+   #  -  read/write ratio
+   #  -  Select_* types
+   #  -  top 5 Com, then "others"
+   #  -  connections, threads, cached threads, aborted, max_connections,
+   #     max_used
+   #  -  Handler operations
+
+   # ########################################################################
+   # Table cache
+   # ########################################################################
+   section Table_cache
+   table_cache=$(get_var table_cache)
+   if [ -z "${table_cache}" ]; then
+      table_cache=$(get_var table_open_cache)
+   fi
+   name_val Size "${table_cache}"
+   open_tables=$(get_stat Open_tables)
+   name_val Usage  "$(fuzzy_pct ${open_tables} ${table_cache})"
+   mysql -ss -e 'SHOW OPEN TABLES' $* > /tmp/aspersa
+   format_open_tables
+
+   #  TODO: tables opened per second
+
+   # ########################################################################
+   # Query cache
+   # ########################################################################
+   query_cache_size=$(get_var query_cache_size);
+   if [ "${query_cache_size}" -gt 0 ]; then
+      section Query_cache
+      name_val Size $(shorten ${query_cache_size});
+      #  TODO cache: size, %full, hit/select, insert/hit ratio
+   fi
+
+   # ########################################################################
+   # Schema, databases, data type, other analysis.
+   # ########################################################################
+   section Schema
+   echo -n "Would you like to mysqldump -d the schema and analyze it? [Y]/n "
+   read reply
+   if echo "${reply:-y}" | grep -qi '^y' ; then
+      mysqldump --all-databases --no-data --skip-comments \
+         --skip-add-locks --skip-add-drop-table --compact \
+         --skip-lock-all-tables --skip-lock-tables --skip-set-charset \
+         --routines --triggers $* > /tmp/aspersa-mysqldump
+      if [ "$?" -eq 0 ]; then
+         format_overall_db_stats
+      else
+         echo "Something went wrong, skipping schema analysis"
+      fi
+   else
+      echo "Skipping schema analysis"
+   fi
+
+   # TODO  show data types in use, and a count(*) of the number of columns
+   # Table of index types, ignoring mysql db
+
+   # ########################################################################
+   # Noteworthy Technologies
+   # ########################################################################
+   section Noteworthy_Technologies
+   if [ -e /tmp/aspersa-mysqldump ]; then
+      if grep -q FULLTEXT /tmp/aspersa-mysqldump; then
+         name_val "Full Text Indexing" Yes
+      else
+         name_val "Full Text Indexing" No
+      fi
+      if grep -q GEOMETRY /tmp/aspersa-mysqldump; then
+         name_val "Geospatial Types" Yes
+      else
+         name_val "Geospatial Types" No
+      fi
+   fi
+   if [ "$(get_stat Ssl_accepts)" -gt 0 ]; then
+      name_val "SSL" Yes
+   else
+      name_val "SSL" No
+   fi
+   if [ "$(get_stat Com_lock)" -gt 0 ]; then
+      name_val "Explicit LOCK TABLES" Yes
+   else
+      name_val "Explicit LOCK TABLES" No
+   fi
+   if [ "$(get_stat Delayed_writes)" -gt 0 ]; then
+      name_val "Delayed Insert" Yes
+   else
+      name_val "Delayed Insert" No
+   fi
+   if [ "$(get_stat Com_xa_start)" -gt 0 ]; then
+      name_val "XA Transactions" Yes
+   else
+      name_val "XA Transactions" No
+   fi
+   if [ "$(get_stat Ndb_cluster_node_id)" -gt 0 ]; then
+      name_val "NDB Cluster" Yes
+   else
+      name_val "NDB Cluster" No
+   fi
+   prep=$(( $(get_stat Com_stmt_prepare) + $(get_stat Com_prepare_sql) ))
+   if [ "${prep}" -gt 0 ]; then
+      name_val "Prepared Statements" Yes
+   else
+      name_val "Prepared Statements" No
+   fi
+
+   # ########################################################################
+   # InnoDB
+   # ########################################################################
+   section InnoDB
+   have_innodb=$(get_var have_innodb)
+   if [ "${have_innodb}" = "YES" ]; then
+
+      version=$(get_var innodb_version)
+      name_val Version ${version:-default}
+
+      lg_size="$(get_var innodb_log_file_size)"
+      lg_fils="$(get_var innodb_log_files_in_group)"
+      lg_totl="$((${lg_size} * ${lg_fils}))"
+      name_val "Log File Size" "${lg_fils} * $(shorten ${lg_size}) = $(shorten ${lg_totl})"
+
+      bp_size="$(get_var innodb_buffer_pool_size)"
+      name_val "Buffer Pool Size" "$(shorten ${bp_size})"
+
+      bp_pags="$(get_stat Innodb_buffer_pool_pages_total)"
+      bp_free="$(get_stat Innodb_buffer_pool_pages_free)"
+      bp_dirt="$(get_stat Innodb_buffer_pool_pages_dirty)"
+      bp_fill=$((${bp_pags} - ${bp_free}))
+      name_val "Buffer Pool Fill"   "$(fuzzy_pct ${bp_fill} ${bp_pags})"
+      name_val "Buffer Pool Dirty"  "$(fuzzy_pct ${bp_dirt} ${bp_pags})"
+      name_val "File Per Table"      $(get_var innodb_file_per_table)
+      name_val "Page Size"           $(shorten $(get_stat Innodb_page_size))
+      name_val "Flush Method"        $(get_var innodb_flush_method)
+      name_val "Flush Log At Commit" $(get_var innodb_flush_log_at_trx_commit)
+      name_val "XA Support"          $(get_var innodb_support_xa)
+      name_val "Checksums"           $(get_var innodb_checksums)
+      name_val "Doublewrite"         $(get_var innodb_doublewrite)
+      name_val "R/W I/O Threads"     "$(get_var innodb_read_io_threads) $(get_var innodb_write_io_threads)"
+      name_val "I/O Capacity"        $(get_var innodb_io_capacity)
+      name_val "Thread Concurrency"  $(get_var innodb_thread_concurrency)
+      name_val "Concurrency Tickets" $(get_var innodb_concurrency_tickets)
+      name_val "Commit Concurrency"  $(get_var innodb_commit_concurrency)
+      name_val "Txn Isolation Level" $(get_var tx_isolation)
+
+
+      # TODO InnoDB: log write rate,
+      #   ratio of row and page
+      #   read/write/etc, #trx, longest trx, #lock waits, #semaphore/mutex waits,
+      #   purge lag, history list length, #purge thread
+      #   main thread state, pending io, checkpoint lag, queries in queue
+
+   fi
+
+   # ########################################################################
+   # MyISAM
+   # TODO: skip if there aren't any tables in use?
+   # ########################################################################
+   section MyISAM
+   buf_size=$(get_var key_buffer_size)
+   blk_size=$(get_var key_cache_block_size)
+   blk_unus=$(get_stat Key_blocks_unused)
+   blk_unfl=$(get_stat Key_blocks_not_flushed)
+   unus=$((${blk_unus} * ${blk_size}))
+   unfl=$((${blk_unfl} * ${blk_size}))
+   used=$((${buf_size} - ${unus}))
+   name_val "Key Cache" "$(shorten ${buf_size})"
+   name_val "Pct Used" "$(fuzzy_pct ${used} ${buf_size})"
+   name_val "Unflushed" "$(fuzzy_pct ${unfl} ${buf_size})"
+
+   # ########################################################################
+   # Users & Security
+   # ########################################################################
+   section Security
+   users="$(mysql -ss \
+      -e 'SELECT COUNT(*), SUM(user=""), SUM(password=""), SUM(password NOT LIKE "*%") FROM mysql.user' $* \
+      | awk '{printf "%d users, %d anon, %d w/o pw, %d old pw\n", $1, $2, $3, $4}')"
+   name_val Users "${users}"
+   name_val "Old Passwords" $(get_var old_passwords)
+
+   # ########################################################################
+   # Binary Logging
+   # ########################################################################
+   section Binary_Logging
+   binlog=$(get_var log_bin)
+   if [ "${binlog}" ]; then
+      mysql -ss -e 'SHOW MASTER LOGS' $* > /tmp/aspersa
+      summarize_binlogs
+      name_val expire_logs_days $(get_var expire_logs_days)
+      name_val sync_binlog $(get_var sync_binlog)
+      name_val server_id $(get_var server_id)
+      mysql -ss -e 'SHOW MASTER STATUS' $* > /tmp/aspersa
+      format_binlog_filters
+   fi
+
 # Replication: seconds behind, running, filters, skip_slave_start, skip_errors,
 # read_only, temp tables open, slave_net_timeout
-#-  noteworthy variables: auto_inc offset, flush_time, init_connect, init_file,
-#   innodb_checksums/doublewrite, commit concurrency, concurrency tickets,
-#   join_buffer_size, sort_buffer_size, max_heap_table_size, read_buffer_size,
-#   read_rnd_buffer_size, server_id, sql_mode    
-#
-#debian:~# mysqldump --all-databases --no-data --loose-skip-comments
-#--skip-add-locks --skip-add-drop-table --compact --skip-lock-all-tables
-#--skip-lock-tables --skip-set-charset | head
-#
+
+   # ########################################################################
+   # Interesting things that you just ought to know about.
+   # ########################################################################
+   section Noteworthy_Variables
+   name_val "Auto-Inc Incr/Offset" "$(get_var auto_increment_increment)/$(get_var auto_increment_offset)"
+   for v in \
+      flush_time init_connect init_file sql_mode;
+   do
+      name_val ${v} $(get_var ${v})
+   done
+   for v in \
+      join_buffer_size sort_buffer_size read_buffer_size read_rnd_buffer_size \
+      max_heap_table_size read_buffer_size thread_stack;
+   do
+      name_val ${v} $(shorten $(get_var ${v}))
+   done
 
    temp_files "rm"
 }

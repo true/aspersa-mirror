@@ -1,0 +1,16 @@
+#!/bin/bash
+#format_overall_db_stats
+
+cat <<EOF > $1
+
+  Database Tables Views SPs Trigs Funcs
+  -------- ------ ----- --- ----- -----
+  mysql        17                      
+  sakila       16     7   3     6     3
+
+  Database InnoDB MyISAM
+  mysql               17
+  sakila       15      1
+EOF
+
+cp samples/mysql-schema-001.txt /tmp/aspersa-mysqldump
