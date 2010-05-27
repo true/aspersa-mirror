@@ -1,0 +1,45 @@
+#!/bin/bash
+
+echo "Samples of disk fill"
+awk '/^\// { print $1 " " $3 }' $1-df | sort | uniq -c
+
+echo
+for dev in $(head $1-df | awk '/^\// { print $1 }' | sort -u); do
+   echo "Disk statistics for ${dev}"
+   grep ${dev} $1-diskstats
+done
+
+echo
+echo "InnoDB stats"
+grep "Main thread" $1-innodb*
+grep "queries inside" $1-innodb*
+grep -A1 "^Pending" $1-innodb*
+
+# TODO: do both in one pass with associative arrays
+echo
+echo "Source of connections to MySQL"
+awk '/:3306/ { print substr($5, 0, index($5, ":") - 1) }' $1-netstat | sort | uniq -c | sort -rn
+echo
+echo "Status of connections to MySQL"
+awk '/:3306/ { print $6 }' $1-netstat | sort | uniq -c | sort -rn
+
+for i in 1 2; do
+   echo
+   echo "Users for processlist $i"
+   awk -F: '/^ *User:/{print $2}' $1-processlist$i | sort | uniq -c | sort -rn
+   echo "States for processlist $i"
+   awk -F: '/^ *State:/{print $2}' $1-processlist$i | sort | uniq -c | sort -rn
+   echo "Commands for processlist $i"
+   awk -F: '/^ *Command:/{print $2}' $1-processlist$i | sort | uniq -c | sort -rn
+done
+
+echo
+echo "Stacktraces"
+
+awk '
+   BEGIN { s = ""; }
+   /Thread/ { print s; s = ""; }
+   /^\#/ { if (s != "" ) { s = s "," $4} else { s = $4 } }
+   END { print s }' \
+   $1-stacktrace | sort | uniq -c | sort -rn
+
