@@ -144,11 +144,13 @@ get_mysql_version () {
    name_val "Built On" "$(get_var version_compile_os) $(get_var version_compile_machine)"
 }
 
-# Gets the system uptime in human readable format.
+# Gets the system start and uptime in human readable format.  Last restart date
+# should be in /tmp/aspersa.
 get_mysql_uptime () {
+   restart="$(cat /tmp/aspersa)"
    uptime="$(get_stat Uptime)"
    uptime="$(secs_to_time ${uptime})"
-   echo "${uptime}"
+   echo "${restart} (up ${uptime})"
 }
 
 # Summarizes the output of SHOW MASTER LOGS, which is in /tmp/aspersa
@@ -357,8 +359,12 @@ main () {
    name_val Time "${now} ($(get_mysql_timezone))"
    name_val Hostname "$(get_var hostname)"
    get_mysql_version
-   # TODO: add in when-restarted, in mysqld's time?
-   name_val Uptime "$(get_mysql_uptime)"
+
+   uptime="$(get_stat Uptime)"
+   mysql -ss -e "SELECT LEFT(NOW() - INTERVAL ${uptime} SECOND, 16)" $* \
+      > /tmp/aspersa
+   name_val Started "$(get_mysql_uptime)"
+
    name_val Databases "$(wc -l /tmp/aspersa-mysql-databases | cut -d' ' -f1)"
    name_val Datadir "$(get_var datadir)"
    procs="$(get_stat Threads_connected)"
@@ -519,7 +525,7 @@ main () {
       lg_fils="$(get_var innodb_log_files_in_group)"
       lg_totl="$((${lg_size} * ${lg_fils}))"
       name_val "Log File Size" "${lg_fils} * $(shorten ${lg_size}) = $(shorten ${lg_totl})"
-      name_val "Log Buffer Size"     $(get_var innodb_log_buffer_size)
+      name_val "Log Buffer Size"     $(shorten $(get_var innodb_log_buffer_size))
       name_val "Flush Method"        $(get_var innodb_flush_method)
       name_val "Flush Log At Commit" $(get_var innodb_flush_log_at_trx_commit)
       name_val "XA Support"          $(get_var innodb_support_xa)
