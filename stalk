@@ -1,6 +1,9 @@
 #!/bin/bash
 # This program is part of Aspersa (http://code.google.com/p/aspersa/)
 
+# TODO: advise if running non-root
+# TODO: never use ~, always use ${HOME}
+
 # ########################################################################
 # A script to watch MySQL and run the 'collect' program when some condition
 # becomes true.  By default, it watches for a too-many-connections condition.
