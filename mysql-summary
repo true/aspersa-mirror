@@ -167,6 +167,8 @@ format_binlog_filters () {
 
 # Slices the processlist a bunch of different ways.  Uses input from
 # /tmp/aspersa-mysql-processlist
+# TODO fuzzy-rounding should be applied to the count/sum/max
+# TODO in user and host section, don't include idle connections in the max/sum
 summarize_processlist () {
    for param in Command User Host db State; do
       echo
@@ -376,6 +378,7 @@ main () {
    # Queries and query plans
    # ########################################################################
 
+   # TODO
    # Status: all time & last 10 seconds
    #  -  QPS, bytes/sec, queries that do a sort per second, number that do a
    #     temp table per second, temp table on disk per second
@@ -405,22 +408,25 @@ main () {
    # Query cache
    # ########################################################################
    query_cache_size=$(get_var query_cache_size);
-   # TODO: also show query_cache_type
-   # TODO: innodb_log_buffer_size
-   if [ "${query_cache_size}" -gt 0 ]; then
+   if [ "$(get_var have_query_cache)" ]; then
       section Query_cache
-      name_val Size $(shorten ${query_cache_size} 1);
-      #  TODO cache: size, %full, hit/select, insert/hit ratio
+      name_val query_cache_type $(get_var query_cache_type)
+      name_val Size "$(shorten ${query_cache_size} 1)"
+      used=$(( ${query_cache_size} - $(get_stat Qcache_free_memory) ))
+      name_val Usage "$(fuzzy_pct ${used} ${query_cache_size})"
+      #  TODO hit/select, insert/hit ratio
    fi
 
    # ########################################################################
    # Schema, databases, data type, other analysis.
    # ########################################################################
    section Schema
-   # TODO: assume yes or no if stdout is not a terminal, or stdin is not a
-   # terminal?
-   echo -n "Would you like to mysqldump -d the schema and analyze it? [Y]/n "
-   read reply
+   # Assume "yes" if stdin or stdout is not a terminal, so this can be run and
+   # put into a file, or piped into a pager, or something else like that.
+   if [ -t 0 -a -t 1 ]; then
+      echo -n "Would you like to mysqldump -d the schema and analyze it? [Y]/n "
+      read reply
+   fi
    if echo "${reply:-y}" | grep -qi '^y' ; then
       mysqldump --all-databases --no-data --skip-comments \
          --skip-add-locks --skip-add-drop-table --compact \
@@ -496,11 +502,6 @@ main () {
       version=$(get_var innodb_version)
       name_val Version ${version:-default}
 
-      lg_size="$(get_var innodb_log_file_size)"
-      lg_fils="$(get_var innodb_log_files_in_group)"
-      lg_totl="$((${lg_size} * ${lg_fils}))"
-      name_val "Log File Size" "${lg_fils} * $(shorten ${lg_size}) = $(shorten ${lg_totl})"
-
       bp_size="$(get_var innodb_buffer_pool_size)"
       name_val "Buffer Pool Size" "$(shorten ${bp_size} 1)"
 
@@ -510,8 +511,15 @@ main () {
       bp_fill=$((${bp_pags} - ${bp_free}))
       name_val "Buffer Pool Fill"   "$(fuzzy_pct ${bp_fill} ${bp_pags})"
       name_val "Buffer Pool Dirty"  "$(fuzzy_pct ${bp_dirt} ${bp_pags})"
+
       name_val "File Per Table"      $(get_var innodb_file_per_table)
       name_val "Page Size"           $(shorten $(get_stat Innodb_page_size))
+
+      lg_size="$(get_var innodb_log_file_size)"
+      lg_fils="$(get_var innodb_log_files_in_group)"
+      lg_totl="$((${lg_size} * ${lg_fils}))"
+      name_val "Log File Size" "${lg_fils} * $(shorten ${lg_size}) = $(shorten ${lg_totl})"
+      name_val "Log Buffer Size"     $(get_var innodb_log_buffer_size)
       name_val "Flush Method"        $(get_var innodb_flush_method)
       name_val "Flush Log At Commit" $(get_var innodb_flush_log_at_trx_commit)
       name_val "XA Support"          $(get_var innodb_support_xa)
@@ -524,18 +532,19 @@ main () {
       name_val "Commit Concurrency"  $(get_var innodb_commit_concurrency)
       name_val "Txn Isolation Level" $(get_var tx_isolation)
 
-
       # TODO InnoDB: log write rate,
-      #   ratio of row and page
-      #   read/write/etc, #trx, longest trx, #lock waits, #semaphore/mutex waits,
-      #   purge lag, history list length, #purge thread
+      #   ratio of row and page read/write/etc, #trx, longest trx, #lock waits,
+      #   #semaphore/mutex waits, purge lag, history list length, #purge thread
       #   main thread state, pending io, checkpoint lag, queries in queue
+      #   include checkpoint age (converted to kb/mb/gb), history list len, age
+      #   of oldest open trx, # read views open, # open trx, and # of pending
+      #   IO.  Measuring semaphore waits would be handy too.
 
    fi
 
    # ########################################################################
    # MyISAM
-   # TODO: skip if there aren't any tables in use?
+   # TODO: skip if there aren't any non-mysql tables in use?
    # ########################################################################
    section MyISAM
    buf_size=$(get_var key_buffer_size)
@@ -600,13 +609,3 @@ main () {
 # Execute the program if it was not included from another file.  This makes it
 # possible to include without executing, and thus test.
 if [ $(basename "$0") = "mysql-summary" ]; then main $*; fi
-
-# TODO 
-# I have few requests to add bits to it:
-# -innodb: include checkpoint age (converted to kb/mb/gb), history list len, age
-# of oldest open trx, # read views open, # open trx, and # of pending IO.
-# Measuring semaphore waits would be handy too.
-# -table cache: show rate of table opens, file opens, etc
-# -qcache: show hit:insert ratio, unused mem
-# -proc list: in user and host section, don't include idle connections (unless
-# they have a trx open)
