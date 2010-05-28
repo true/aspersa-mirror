@@ -4,7 +4,7 @@
 cat <<EOF > $1
              Binlogs | 20
           Zero-Sized | 3
-          Total Size | 2G
+          Total Size | 6.5G
 EOF
 
 cp samples/mysql-master-logs-001.txt /tmp/aspersa

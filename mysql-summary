@@ -119,13 +119,14 @@ fuzzy_pct () {
 
 # Parses the output of 'ps -eaf | grep mysqld' which should be in /tmp/aspersa.
 parse_mysqld_instances () {
-   echo "  Port  Data Directory  Socket"
-   echo "  ===== =============== ======"
-   # Put the datadir, port, socket, and pid into that order at the front of line
-   sed -e 's/^\(.*\)--socket=\([^ ]*\)/\2 \1/' \
-      -e 's/^\(.*\)--port=\([0-9]*\)/\2 \1/' \
-      -e 's/^\(.*\)--datadir=\([^ ]*\)/\2 \1/' /tmp/aspersa \
-      | awk '/\/mysqld / { printf "  %5d %-15s %s\n", $2, $1, $3 }'
+   echo "  Port  Data Directory             Socket"
+   echo "  ===== ========================== ======"
+   grep '/mysqld ' /tmp/aspersa | while read line; do
+      sock=$(echo "${line}" | grep -o -- '--socket=[^ ]*' | cut -d= -f2)
+      port=$(echo "${line}" | grep -o -- '--port=[^ ]*' | cut -d= -f2)
+      datadir=$(echo "${line}" | grep -o -- '--datadir=[^ ]*' | cut -d= -f2)
+      printf "  %5d %-26s %s\n" "${port}" "${datadir}" "${sock}"
+   done
 }
 
 # Gets the MySQL system time.  Uses input from /tmp/aspersa-mysql-variables.
@@ -154,8 +155,8 @@ get_mysql_uptime () {
 summarize_binlogs () {
    name_val "Binlogs" $(wc -l /tmp/aspersa)
    name_val "Zero-Sized" $(grep -c '\<0$' /tmp/aspersa)
-   size=$(awk '{t += $2} END{printf "%d\n", t}' /tmp/aspersa)
-   name_val "Total Size" $(shorten ${size})
+   size=$(awk '{t += $2} END{printf "%0.f\n", t}' /tmp/aspersa)
+   name_val "Total Size" $(shorten ${size} 1)
 }
 
 # Print out binlog_do_db and binlog_ignore_db
@@ -177,10 +178,10 @@ summarize_processlist () {
          \$1 == \"${param}:\" {
             p = substr(\$0, index(\$0, \":\") + 2);
             if ( index(p, \":\") > 0 ) {
-               p = substr(p, 0, index(p, \":\"));
+               p = substr(p, 1, index(p, \":\") - 1);
             }
             if ( length(p) > 30 ) {
-               p = substr(p, 0, 31);
+               p = substr(p, 1, 30);
             }
          }
          \$1 == \"Time:\" {
@@ -201,25 +202,23 @@ summarize_processlist () {
    echo
 }
 
-# Summarizes SHOW OPEN TABLES, which should be in /tmp/aspersa
-format_open_tables () {
-   echo "  Top open tables                          CNT"
-   echo "  ---------------------------------------- ---"
-   sort -nr -k3,3 /tmp/aspersa | head -n5 \
-      | awk '{printf "  %-40s %3d\n", $1 "." $2, $3}'
-}
-
 # Summarizes per-database statistics for a bunch of different things: count of
 # tables, views, etc.  Data should be in /tmp/aspersa-mysqldump and /tmp/aspersa
 # gets overwritten.
 format_overall_db_stats () {
    echo
    # We keep counts of everything in an associative array keyed by db name, and
-   # what it is.
+   # what it is.  The num_dbs counter is to ensure sort order is consistent.
    awk '
+      BEGIN {
+         num_dbs = 0;
+      }
       /^USE `.*`;$/ {
          db = substr($2, 2, length($2) - 3);
-         dbs[db] = db;
+         if ( db_seen[db]++ == 0 ) {
+            dbs[num_dbs] = db;
+            num_dbs++;
+         }
       }
       /^CREATE TABLE/ {
          counts[db ",tables"]++;
@@ -238,15 +237,15 @@ format_overall_db_stats () {
       }
       END {
          mdb = length("Database");
-         for ( db in dbs ) {
-            if ( length(db) > mdb ) {
-               mdb = length(db);
+         for ( i=0;i<num_dbs;i++ ) {
+            if ( length(dbs[i]) > mdb ) {
+               mdb = length(dbs[i]);
             }
          }
          fmt = "  %-" mdb "s %6s %5s %3s %5s %5s\n";
          printf fmt, "Database", "Tables", "Views", "SPs", "Trigs", "Funcs";
-         printf fmt, "--------", "------", "-----", "---", "-----", "-----";
-         for ( db in dbs ) {
+         for ( i=0;i<num_dbs;i++ ) {
+            db = dbs[i];
             printf fmt, db, counts[db ",tables"], counts[db ",views"], counts[db ",sps"], counts[db ",trg"], counts[db ",func"];
          }
       }
@@ -257,32 +256,46 @@ format_overall_db_stats () {
    echo
    # Now do the summary of engines per DB
    awk '
+      BEGIN {
+         num_dbs     = 0;
+         num_engines = 0;
+      }
       /^USE `.*`;$/ {
          db = substr($2, 2, length($2) - 3);
-         dbs[db] = db;
+         if ( db_seen[db]++ == 0 ) {
+            dbs[num_dbs] = db;
+            num_dbs++;
+         }
       }
       /^\) ENGINE=/ {
          engine=substr($2, index($2, "=") + 1);
-         engines[engine] = engine;
+         if ( engine_seen[engine]++ == 0 ) {
+            engines[num_engines] = engine;
+            num_engines++;
+         }
          counts[db "," engine]++;
       }
       END {
          mdb = length("Database");
-         for ( db in dbs ) {
+         for ( i=0;i<num_dbs;i++ ) {
+            db = dbs[i];
             if ( length(db) > mdb ) {
                mdb = length(db);
             }
          }
          fmt = "  %-" mdb "s"
          printf fmt, "Database";
-         for ( engine in engines ) {
+         for ( i=0;i<num_engines;i++ ) {
+            engine = engines[i];
             fmts[engine] = " %" length(engine) "s";
             printf fmts[engine], engine;
          }
          print "";
-         for ( db in dbs ) {
+         for ( i=0;i<num_dbs;i++ ) {
+            db = dbs[i];
             printf fmt, db;
-            for ( engine in engines ) {
+            for ( j=0;j<num_dbs;j++ ) {
+               engine = engines[j];
                printf fmts[engine], counts[db "," engine];
             }
             print "";
@@ -291,7 +304,8 @@ format_overall_db_stats () {
    ' /tmp/aspersa-mysqldump > /tmp/aspersa
    head -n1 /tmp/aspersa
    tail -n+2 /tmp/aspersa | sort
-   
+   echo
+
 }
 
 # ##############################################################################
@@ -344,6 +358,7 @@ main () {
    # TODO: add in when-restarted, in mysqld's time?
    name_val Uptime "$(get_mysql_uptime)"
    name_val Databases "$(wc -l /tmp/aspersa-mysql-databases | cut -d' ' -f1)"
+   name_val Datadir "$(get_var datadir)"
    procs="$(get_stat Threads_connected)"
    procr="$(get_stat Threads_running)"
    name_val Processes "$(fuzz ${procs}) connected, $(fuzz ${procr}) running"
@@ -383,8 +398,6 @@ main () {
    name_val Size "${table_cache}"
    open_tables=$(get_stat Open_tables)
    name_val Usage  "$(fuzzy_pct ${open_tables} ${table_cache})"
-   mysql -ss -e 'SHOW OPEN TABLES' $* > /tmp/aspersa
-   format_open_tables
 
    #  TODO: tables opened per second
 
@@ -392,9 +405,11 @@ main () {
    # Query cache
    # ########################################################################
    query_cache_size=$(get_var query_cache_size);
+   # TODO: also show query_cache_type
+   # TODO: innodb_log_buffer_size
    if [ "${query_cache_size}" -gt 0 ]; then
       section Query_cache
-      name_val Size $(shorten ${query_cache_size});
+      name_val Size $(shorten ${query_cache_size} 1);
       #  TODO cache: size, %full, hit/select, insert/hit ratio
    fi
 
@@ -402,6 +417,8 @@ main () {
    # Schema, databases, data type, other analysis.
    # ########################################################################
    section Schema
+   # TODO: assume yes or no if stdout is not a terminal, or stdin is not a
+   # terminal?
    echo -n "Would you like to mysqldump -d the schema and analyze it? [Y]/n "
    read reply
    if echo "${reply:-y}" | grep -qi '^y' ; then
@@ -431,7 +448,7 @@ main () {
       else
          name_val "Full Text Indexing" No
       fi
-      if grep -q GEOMETRY /tmp/aspersa-mysqldump; then
+      if grep -q 'GEOMETRY\|POINT\|LINESTRING\|POLYGON' /tmp/aspersa-mysqldump; then
          name_val "Geospatial Types" Yes
       else
          name_val "Geospatial Types" No
@@ -485,7 +502,7 @@ main () {
       name_val "Log File Size" "${lg_fils} * $(shorten ${lg_size}) = $(shorten ${lg_totl})"
 
       bp_size="$(get_var innodb_buffer_pool_size)"
-      name_val "Buffer Pool Size" "$(shorten ${bp_size})"
+      name_val "Buffer Pool Size" "$(shorten ${bp_size} 1)"
 
       bp_pags="$(get_stat Innodb_buffer_pool_pages_total)"
       bp_free="$(get_stat Innodb_buffer_pool_pages_free)"
@@ -528,7 +545,7 @@ main () {
    unus=$((${blk_unus} * ${blk_size}))
    unfl=$((${blk_unfl} * ${blk_size}))
    used=$((${buf_size} - ${unus}))
-   name_val "Key Cache" "$(shorten ${buf_size})"
+   name_val "Key Cache" "$(shorten ${buf_size} 1)"
    name_val "Pct Used" "$(fuzzy_pct ${used} ${buf_size})"
    name_val "Unflushed" "$(fuzzy_pct ${unfl} ${buf_size})"
 
@@ -572,7 +589,7 @@ main () {
    done
    for v in \
       join_buffer_size sort_buffer_size read_buffer_size read_rnd_buffer_size \
-      max_heap_table_size read_buffer_size thread_stack;
+      max_heap_table_size tmp_table_size read_buffer_size thread_stack;
    do
       name_val ${v} $(shorten $(get_var ${v}))
    done
@@ -583,3 +600,13 @@ main () {
 # Execute the program if it was not included from another file.  This makes it
 # possible to include without executing, and thus test.
 if [ $(basename "$0") = "mysql-summary" ]; then main $*; fi
+
+# TODO 
+# I have few requests to add bits to it:
+# -innodb: include checkpoint age (converted to kb/mb/gb), history list len, age
+# of oldest open trx, # read views open, # open trx, and # of pending IO.
+# Measuring semaphore waits would be handy too.
+# -table cache: show rate of table opens, file opens, etc
+# -qcache: show hit:insert ratio, unused mem
+# -proc list: in user and host section, don't include idle connections (unless
+# they have a trx open)
