@@ -830,6 +830,7 @@ main () {
    # ########################################################################
    # Network stuff
    # ########################################################################
+   # TODO echo 131072 > /proc/sys/net/ipv4/ip_conntrack_max
    section Network_Config
    if lspci > /tmp/aspersa 2>/dev/null; then
       parse_ethernet_controller_lspci
