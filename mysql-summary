@@ -598,7 +598,7 @@ main () {
    section Noteworthy_Variables
    name_val "Auto-Inc Incr/Offset" "$(get_var auto_increment_increment)/$(get_var auto_increment_offset)"
    for v in \
-      flush_time init_connect init_file sql_mode;
+      default_storage_engine flush_time init_connect init_file sql_mode;
    do
       name_val ${v} $(get_var ${v})
    done
