@@ -582,6 +582,8 @@ main () {
    if [ "${binlog}" ]; then
       mysql -ss -e 'SHOW MASTER LOGS' $* > /tmp/aspersa
       summarize_binlogs
+      format="$(get_var binlog_format)"
+      name_val binlog_format "${format:-STATEMENT}"
       name_val expire_logs_days $(get_var expire_logs_days)
       name_val sync_binlog $(get_var sync_binlog)
       name_val server_id $(get_var server_id)
@@ -590,7 +592,7 @@ main () {
    fi
 
 # Replication: seconds behind, running, filters, skip_slave_start, skip_errors,
-# read_only, temp tables open, slave_net_timeout
+# read_only, temp tables open, slave_net_timeout, slave_exec_mode
 
    # ########################################################################
    # Interesting things that you just ought to know about.
