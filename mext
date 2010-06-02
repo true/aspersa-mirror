@@ -8,13 +8,10 @@ usage() {
    echo "   -r     Relative: subtract each column from the previous column."
    echo "   --     Option separator; after this, all arguments are passed"
    echo "          to the program whose output mext will columnize."
-   echo "mext columnizes repeated output from a program like mysqladmin extended."
-   echo "Example: 'mext -r -- mysqladmin ext -i10 -c3'"
+   echo "mext columnizes repeated output from a program like mysqladmin extended:"
+   echo "   mext -r -- mysqladmin ext -i10 -c3"
    echo "You can also work with data from a file:"
-   echo "Example: 'mext -r -- cat mysqladmin-output.txt'"
-   echo "If this throws an error, try bash instead of sh, and submit a bug "
-   echo "report to bug 24.  We need a reproducible test case."
-   echo "If getopts doesn't work on your system, maybe mext2 will help"
+   echo "   mext -r -- cat mysqladmin-output.txt"
    exit 1
 }
 
@@ -64,7 +61,7 @@ NUM=`expr $NUM - 3`;
 
 # Join each file with the next file, joining on the first field. Build a printf
 # spec and awk spec at the same time.
-for i in `eval echo {0..$NUM}`; do
+for i in `seq 0 $NUM`; do
    NEXTFILE=`expr $i + 1`;
 
    # Sort each file and eliminate empty lines, so 'join' doesn't complain.
