@@ -276,7 +276,7 @@ parse_filesystems () {
          }
       }
       END{
-         print "%-" f "s %4s %4s %-" t "s %-" m "s %s";
+         print "%-" f "s %5s %4s %-" t "s %-" m "s %s";
       }
    ' /tmp/aspersa)";
    awk "
