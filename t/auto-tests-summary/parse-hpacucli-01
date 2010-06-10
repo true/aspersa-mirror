@@ -1,5 +1,5 @@
 #!/bin/bash
-#parse_hpaculi
+#parse_hpacucli
 
 cat <<EOF > $1
       logicaldrive 1 (136.7 GB, RAID 1, OK)

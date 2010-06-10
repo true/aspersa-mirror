@@ -365,7 +365,7 @@ parse_raid_controller_dmesg () {
 # Parse the output of "hpacucli ctrl all show config", which should be stored in
 # /tmp/aspersa
 # ##############################################################################
-parse_hpaculi () {
+parse_hpacucli () {
    grep 'logicaldrive\|physicaldrive' /tmp/aspersa
 }
 
@@ -789,7 +789,7 @@ main () {
       fi
    elif [ "${controller}" = "HP Smart Array" ]; then
       if hpacucli ctrl all show config > /tmp/aspersa 2>/dev/null; then
-         parse_hpaculi
+         parse_hpacucli
       fi
    elif [ "${controller}" = "LSI Logic MegaRAID SAS" ]; then
       if MegaCli64 -AdpAllInfo -aALL > /tmp/aspersa 2>/dev/null; then
