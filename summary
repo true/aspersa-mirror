@@ -337,7 +337,10 @@ parse_raid_controller_lspci () {
    elif grep -q "RAID bus controller: Adaptec AAC-RAID" /tmp/aspersa; then
       echo 'AACRAID'
    elif grep -q "${pat}3ware [0-9]* Storage Controller" /tmp/aspersa; then
+      # TODO: what is $pat supposed to be?  Copy-paste error.
       echo '3Ware'
+   elif grep -q "Hewlett-Packard Company Smart Array" /tmp/aspersa; then
+      echo 'HP Smart Array'
    fi
 }
 
