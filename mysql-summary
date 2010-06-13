@@ -196,7 +196,8 @@ format_binlog_filters () {
 }
 
 # Slices the processlist a bunch of different ways.  Uses input from
-# /tmp/aspersa-mysql-processlist
+# /tmp/aspersa-mysql-processlist.  This is a bit awkward because different
+# versions of awk have limitations like "too many fields on line xyz".
 # TODO fuzzy-rounding should be applied to the count/sum/max
 # TODO in user and host section, don't include idle connections in the max/sum
 summarize_processlist () {
@@ -206,7 +207,8 @@ summarize_processlist () {
          "${param}" "COUNT(*)" "SUM(Time)" "MAX(Time)"
       echo "  ------------------------------" \
          "-------- --------- ---------"
-      awk "
+      cut -c1-80 /tmp/aspersa-mysql-processlist \
+         | awk "
          \$1 == \"${param}:\" {
             p = substr(\$0, index(\$0, \":\") + 2);
             if ( index(p, \":\") > 0 ) {
@@ -222,14 +224,14 @@ summarize_processlist () {
          \$1 == \"Info:\" {
             count[p]++;
             time[p] += t;
-            mtime[p] = t > mtime[p] ? t : mtime[p];
+            if ( t > mtime[p] ) { mtime[p] = t; }
          }
          END {
             for ( p in count ) {
                printf \"  %-30s %8d %9d %9d\n\", p, count[p], time[p], mtime[p];
             }
          }
-      " /tmp/aspersa-mysql-processlist | sort
+      " | sort
    done
    echo
 }
