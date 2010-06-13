@@ -99,7 +99,24 @@ get_stat () {
 # as the number gets larger.  This is to make things easier to diff.
 fuzz () {
    echo $1 | awk '{
-      printf "%d", ($1 <= 10 ? $1 : $1 <= 50 ? sprintf("%.0f", $1 / 5) * 5 : $1 <= 100 ?  sprintf("%.0f", $1 / 10) * 10 : $1 <= 250 ? sprintf("%.0f", $1 / 25) * 25 : $1 <= 500 ? sprintf("%.0f", $1 / 50) * 50 : sprintf("%.0f", $1 / 100) * 100);
+      if ($1 <= 10 ) {
+         print val;
+      }
+      else if ( $1 <= 50 ) {
+         print sprintf("%.0f", $1 / 5) * 5;
+      }
+      else if ( $1 <= 100 ) {
+         print sprintf("%.0f", $1 / 10) * 10;
+      }
+      else if ( $1 <= 250 ) {
+         print sprintf("%.0f", $1 / 25) * 25;
+      }
+      else if ( $1 <= 500 ) {
+         print sprintf("%.0f", $1 / 50) * 50;
+      }
+      else {
+         print sprintf("%.0f", $1 / 100) * 100;
+      }
    }'
 }
 
@@ -117,7 +134,8 @@ fuzzy_pct () {
 # put sample data into /tmp/aspersa and call it.
 # ##############################################################################
 
-# Parses the output of 'ps -eaf | grep mysqld' which should be in /tmp/aspersa.
+# Parses the output of 'ps -e -o args | grep mysqld'
+# which should be in /tmp/aspersa.
 parse_mysqld_instances () {
    echo "  Port  Data Directory             Socket"
    echo "  ===== ========================== ======"
@@ -343,7 +361,7 @@ main () {
    section Aspersa_MySQL_Summary_Report
    name_val "System time" "`date -u +'%F %T UTC'` (local TZ: `date +'%Z %z'`)"
    section Instances
-   ps -eaf | grep mysqld > /tmp/aspersa
+   ps -ea -o args | grep mysqld > /tmp/aspersa
    parse_mysqld_instances
 
    # ########################################################################
@@ -375,7 +393,7 @@ main () {
       > /tmp/aspersa
    name_val Started "$(get_mysql_uptime)"
 
-   name_val Databases "$(wc -l /tmp/aspersa-mysql-databases | cut -d' ' -f1)"
+   name_val Databases "$(grep -c . /tmp/aspersa-mysql-databases)"
    name_val Datadir "$(get_var datadir)"
    procs="$(get_stat Threads_connected)"
    procr="$(get_stat Threads_running)"
