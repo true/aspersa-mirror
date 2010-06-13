@@ -122,10 +122,20 @@ parse_mysqld_instances () {
    echo "  Port  Data Directory             Socket"
    echo "  ===== ========================== ======"
    grep '/mysqld ' /tmp/aspersa | while read line; do
-      sock=$(echo "${line}" | grep -o -- '--socket=[^ ]*' | cut -d= -f2)
-      port=$(echo "${line}" | grep -o -- '--port=[^ ]*' | cut -d= -f2)
-      datadir=$(echo "${line}" | grep -o -- '--datadir=[^ ]*' | cut -d= -f2)
-      printf "  %5d %-26s %s\n" "${port}" "${datadir}" "${sock}"
+      for word in ${line}; do
+         # Some grep doesn't have -o, so I have to pull out the words I want by
+         # looking at each word
+         if echo "${word}" | grep -- "--socket=" > /dev/null; then
+            socket="$(echo "${word}" | cut -d= -f2)"
+         fi
+         if echo "${word}" | grep -- "--port=" > /dev/null; then
+            port="$(echo "${word}" | cut -d= -f2)"
+         fi
+         if echo "${word}" | grep -- "--datadir=" > /dev/null; then
+            datadir="$(echo "${word}" | cut -d= -f2)"
+         fi
+      done
+      printf "  %5d %-26s %s\n" "${port}" "${datadir}" "${socket}"
    done
 }
 
