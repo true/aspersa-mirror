@@ -85,14 +85,18 @@ secs_to_time () {
    }'
 }
 
-# gets a value from /tmp/aspersa-mysql-variables.
+# gets a value from /tmp/aspersa-mysql-variables.  Returns zero if it doesn't
+# exist.
 get_var () {
-   awk "\$1 ~ /^$1$/ { print \$2 }" /tmp/aspersa-mysql-variables
+   v="$(awk "\$1 ~ /^$1$/ { print \$2 }" /tmp/aspersa-mysql-variables)"
+   echo "${v:-0}"
 }
 
-# gets a value from /tmp/aspersa-mysql-status.
+# gets a value from /tmp/aspersa-mysql-status.  Returns zero if it doesn't
+# exist.
 get_stat () {
-   awk "\$1 ~ /^$1$/ { print \$2 }" /tmp/aspersa-mysql-status
+   v="$(awk "\$1 ~ /^$1$/ { print \$2 }" /tmp/aspersa-mysql-status)"
+   echo "${v:-0}"
 }
 
 # Does fuzzy rounding: rounds to nearest interval, but the interval gets larger
@@ -122,7 +126,7 @@ fuzz () {
 
 # Fuzzy computes the percent that $1 is of $2
 fuzzy_pct () {
-   pct=$(echo $1 $2 | awk '{printf "%d", $1/$2*100}');
+   pct=$(echo $1 $2 | awk '{ if ($2 > 0) { printf "%d", $1/$2*100; } else {print 0} }');
    echo "$(fuzz ${pct})%"
 }
 
@@ -463,7 +467,7 @@ main () {
       echo -n "Would you like to mysqldump -d the schema and analyze it? [Y]/n "
       read reply
    fi
-   if echo "${reply:-y}" | grep -qi '^y' ; then
+   if echo "${reply:-y}" | grep -i '^y' > /dev/null ; then
       mysqldump --all-databases --no-data --skip-comments \
          --skip-add-locks --skip-add-drop-table --compact \
          --skip-lock-all-tables --skip-lock-tables --skip-set-charset \
@@ -485,12 +489,12 @@ main () {
    # ########################################################################
    section Noteworthy_Technologies
    if [ -e /tmp/aspersa-mysqldump ]; then
-      if grep -q FULLTEXT /tmp/aspersa-mysqldump; then
+      if grep FULLTEXT /tmp/aspersa-mysqldump > /dev/null; then
          name_val "Full Text Indexing" Yes
       else
          name_val "Full Text Indexing" No
       fi
-      if grep -q 'GEOMETRY\|POINT\|LINESTRING\|POLYGON' /tmp/aspersa-mysqldump; then
+      if grep 'GEOMETRY\|POINT\|LINESTRING\|POLYGON' /tmp/aspersa-mysqldump > /dev/null; then
          name_val "Geospatial Types" Yes
       else
          name_val "Geospatial Types" No
@@ -636,7 +640,7 @@ main () {
    done
    for v in \
       join_buffer_size sort_buffer_size read_buffer_size read_rnd_buffer_size \
-      max_heap_table_size tmp_table_size read_buffer_size thread_stack;
+      max_heap_table_size tmp_table_size thread_stack;
    do
       name_val ${v} $(shorten $(get_var ${v}))
    done
