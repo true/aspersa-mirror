@@ -76,11 +76,11 @@ shorten() {
 # ##############################################################################
 # Function to take a file and collapse it into an aggregated list.  This
 # function works on $1, which it expects to be created with 'sort |
-# uniq -c'.  Leading whitespace is deleted.  The result is stored into the
-# variable named in $2.  The result will look like "4xabc, 1xdef"
+# uniq -c'.  Leading whitespace is deleted.  The result will look like
+# "4xabc, 1xdef"
 # ##############################################################################
 group_concat () {
-   export "${2}"="$(sed -e '{H; $!d}' -e 'x' -e 's/\n[[:space:]]*\([[:digit:]]*\)[[:space:]]*/, \1x/g' -e 's/[[:space:]][[:space:]]*/ /g' -e 's/, //' ${1})"
+   sed -e '{H; $!d}' -e 'x' -e 's/\n[[:space:]]*\([[:digit:]]*\)[[:space:]]*/, \1x/g' -e 's/[[:space:]][[:space:]]*/ /g' -e 's/, //' ${1}
    # In words: save the whole file into the hold space,
    # {H; $!d}
    # Swap it back into the pattern space,
@@ -127,18 +127,15 @@ parse_proc_cpuinfo () {
 
    awk -F: '/cpu MHz/{print $2}' /tmp/aspersa \
       | sort | uniq -c > /tmp/aspersa2
-   group_concat /tmp/aspersa2 val
-   name_val "Speeds" "${val}"
+   name_val "Speeds" "$(group_concat /tmp/aspersa2)"
 
    awk -F: '/model name/{print $2}' /tmp/aspersa \
       | sort | uniq -c > /tmp/aspersa2
-   group_concat /tmp/aspersa2 val
-   name_val "Models" "${val}"
+   name_val "Models" "$(group_concat /tmp/aspersa2)"
 
    awk -F: '/cache size/{print $2}' /tmp/aspersa \
       | sort | uniq -c > /tmp/aspersa2
-   group_concat /tmp/aspersa2 val
-   name_val "Caches" "${val}"
+   name_val "Caches" "$(group_concat /tmp/aspersa2)"
 }
 
 # ##############################################################################
@@ -336,8 +333,7 @@ parse_raid_controller_lspci () {
       echo 'LSI Logic Unknown'
    elif grep -q "RAID bus controller: Adaptec AAC-RAID" /tmp/aspersa; then
       echo 'AACRAID'
-   elif grep -q "${pat}3ware [0-9]* Storage Controller" /tmp/aspersa; then
-      # TODO: what is $pat supposed to be?  Copy-paste error.
+   elif grep -q "3ware [0-9]* Storage Controller" /tmp/aspersa; then
       echo '3Ware'
    elif grep -q "Hewlett-Packard Company Smart Array" /tmp/aspersa; then
       echo 'HP Smart Array'
@@ -735,7 +731,6 @@ main () {
    # Disks, RAID, Filesystems
    # ########################################################################
    # TODO: Add info about software RAID
-   # TODO: add info about /proc/sys/fs/file-max
    section "Mounted_Filesystems"
    df -hP | sort > /tmp/aspersa2
    mount | sort | join /tmp/aspersa2 - > /tmp/aspersa
@@ -747,6 +742,11 @@ main () {
       if [ -e "/sys/block/${disk}/queue/scheduler" ]; then
          name_val "${disk}" "$(cat /sys/block/${disk}/queue/scheduler | grep -o '\[.*\]') $(cat /sys/block/${disk}/queue/nr_requests)"
       fi
+   done
+
+   section "Kernel_Inode_State"
+   for file in dentry-state file-nr inode-nr; do
+      name_val "${file}" "$(cat /proc/sys/fs/${file} 2>&1)"
    done
 
    section "LVM_Volumes"
@@ -783,17 +783,24 @@ main () {
    # in a weird location, such as /usr/StorMan/arcconf, should have their
    # location added to $PATH at the beginning of main().
    # ########################################################################
+   notfound=""
    if [ "${controller}" = "AACRAID" ]; then
       if arcconf getconfig 1 > /tmp/aspersa 2>/dev/null; then
          parse_arcconf
+      elif ! which arcconf >/dev/null 2>&1; then
+         notfound="e.g. http://www.adaptec.com/en-US/support/raid/scsi_raid/ASR-2120S/"
       fi
    elif [ "${controller}" = "HP Smart Array" ]; then
       if hpacucli ctrl all show config > /tmp/aspersa 2>/dev/null; then
          parse_hpacucli
+      elif ! which hpacucli >/dev/null 2>&1; then
+         notfound="your package repository or the manufacturer's website"
       fi
    elif [ "${controller}" = "LSI Logic MegaRAID SAS" ]; then
       if MegaCli64 -AdpAllInfo -aALL > /tmp/aspersa 2>/dev/null; then
          parse_lsi_megaraid_adapter_info
+      elif ! which MegaCli64 >/dev/null 2>&1; then
+         notfound="your package repository or the manufacturer's website"
       fi
       if MegaCli64 -AdpBbuCmd -GetBbuStatus -aALL > /tmp/aspersa 2>/dev/null; then
          parse_lsi_megaraid_bbu_status
@@ -802,6 +809,11 @@ main () {
          parse_lsi_megaraid_virtual_devices
          parse_lsi_megaraid_devices
       fi
+   fi
+
+   if [ "${notfound}" ]; then
+      echo "   Raid controller not found; try getting it from"
+      echo "   ${notfound}"
    fi
 
    # ########################################################################
@@ -833,7 +845,6 @@ main () {
    # ########################################################################
    # Network stuff
    # ########################################################################
-   # TODO echo 131072 > /proc/sys/net/ipv4/ip_conntrack_max
    section Network_Config
    if lspci > /tmp/aspersa 2>/dev/null; then
       parse_ethernet_controller_lspci
@@ -842,6 +853,10 @@ main () {
       name_val "FIN Timeout" "$(sysctl net.ipv4.tcp_fin_timeout)"
       name_val "Port Range" "$(sysctl net.ipv4.ip_local_port_range)"
    fi
+
+   # TODO cat /proc/sys/net/ipv4/ip_conntrack_max ; it might be
+   # /proc/sys/net/netfilter/nf_conntrack_max or /proc/sys/net/nf_conntrack_max
+   # in new kernels like Fedora 12?
 
    section Interface_Statistics
    if ip -s link > /tmp/aspersa 2>/dev/null; then
