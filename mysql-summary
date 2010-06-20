@@ -16,6 +16,34 @@
 # Globals, helper functions
 # ########################################################################
 
+# The awk code for fuzzy rounding.  (It's used in a few places, so makes sense
+# not to duplicate).  It fuzzy-rounds the variable named fuzzy_var.  It goes in
+# steps of 5, 10, 25, then repeats by a factor of 10 larger (50, 100, 250), and
+# so on, until it finds a number that's large enough.  The pattern is slightly
+# broken between the initial 1 and 50, because rounding to the nearest 2.5
+# doesn't seem right to me.
+fuzzy_formula='
+   rounded = 0;
+   if (fuzzy_var <= 10 ) {
+      rounded   = 1;
+   }
+   factor = 1;
+   while ( rounded == 0 ) {
+      if ( fuzzy_var <= 50 * factor ) {
+         fuzzy_var = sprintf("%.0f", fuzzy_var / (5 * factor)) * 5 * factor;
+         rounded   = 1;
+      }
+      else if ( fuzzy_var <= 100  * factor) {
+         fuzzy_var = sprintf("%.0f", fuzzy_var / (10 * factor)) * 10 * factor;
+         rounded   = 1;
+      }
+      else if ( fuzzy_var <= 250  * factor) {
+         fuzzy_var = sprintf("%.0f", fuzzy_var / (25 * factor)) * 25 * factor;
+         rounded   = 1;
+      }
+      factor = factor * 10;
+   }'
+
 # The temp files are for storing working results so we don't call commands many
 # times (gives inconsistent results, maybe adds load on things I don't want to
 # such as RAID controllers).  They must not exist -- if they did, someone would
@@ -102,26 +130,7 @@ get_stat () {
 # Does fuzzy rounding: rounds to nearest interval, but the interval gets larger
 # as the number gets larger.  This is to make things easier to diff.
 fuzz () {
-   echo $1 | awk '{
-      if ($1 <= 10 ) {
-         print val;
-      }
-      else if ( $1 <= 50 ) {
-         print sprintf("%.0f", $1 / 5) * 5;
-      }
-      else if ( $1 <= 100 ) {
-         print sprintf("%.0f", $1 / 10) * 10;
-      }
-      else if ( $1 <= 250 ) {
-         print sprintf("%.0f", $1 / 25) * 25;
-      }
-      else if ( $1 <= 500 ) {
-         print sprintf("%.0f", $1 / 50) * 50;
-      }
-      else {
-         print sprintf("%.0f", $1 / 100) * 100;
-      }
-   }'
+   echo $1 | awk "{fuzzy_var=\$1; ${fuzzy_formula} print fuzzy_var;}"
 }
 
 # Fuzzy computes the percent that $1 is of $2
@@ -200,17 +209,21 @@ format_binlog_filters () {
 }
 
 # Slices the processlist a bunch of different ways.  Uses input from
-# /tmp/aspersa-mysql-processlist.  This is a bit awkward because different
-# versions of awk have limitations like "too many fields on line xyz".
-# TODO fuzzy-rounding should be applied to the count/sum/max
-# TODO in user and host section, don't include idle connections in the max/sum
+# /tmp/aspersa-mysql-processlist.  The processlist should be created with the \G
+# flag so it's vertical.  The parsing is a bit awkward because different
+# versions of awk have limitations like "too many fields on line xyz".  So we
+# use 'cut' to shorten the lines.  We count all things into temporary variables
+# for each process in the processlist, and when we hit the Info: line which
+# ought to be the last line in the process, we decide what to do with the temp
+# variables.  If we're summarizing Command, we count everything; otherwise, only
+# non-Sleep processes get counted towards the sum and max of Time.
 summarize_processlist () {
    for param in Command User Host db State; do
       echo
-      printf '  %-30s %8s %9s %9s\n' \
-         "${param}" "COUNT(*)" "SUM(Time)" "MAX(Time)"
+      printf '  %-30s %8s %7s %9s %9s\n' \
+         "${param}" "COUNT(*)" Working "SUM(Time)" "MAX(Time)"
       echo "  ------------------------------" \
-         "-------- --------- ---------"
+         "-------- ------- --------- ---------"
       cut -c1-80 /tmp/aspersa-mysql-processlist \
          | awk "
          \$1 == \"${param}:\" {
@@ -225,14 +238,26 @@ summarize_processlist () {
          \$1 == \"Time:\" {
             t = \$2;
          }
+         \$1 == \"Command:\" {
+            c = \$2;
+         }
          \$1 == \"Info:\" {
             count[p]++;
-            time[p] += t;
-            if ( t > mtime[p] ) { mtime[p] = t; }
+            if ( c == \"Sleep\" ) {
+               sleep[p]++;
+            }
+            if ( \"${param}\" == \"Command\" || c != \"Sleep\" ) {
+               time[p] += t;
+               if ( t > mtime[p] ) { mtime[p] = t; }
+            }
          }
          END {
             for ( p in count ) {
-               printf \"  %-30s %8d %9d %9d\n\", p, count[p], time[p], mtime[p];
+               fuzzy_var=count[p]-sleep[p]; ${fuzzy_formula} fuzzy_work=fuzzy_var;
+               fuzzy_var=count[p];          ${fuzzy_formula} fuzzy_count=fuzzy_var;
+               fuzzy_var=time[p];           ${fuzzy_formula} fuzzy_time=fuzzy_var;
+               fuzzy_var=mtime[p];          ${fuzzy_formula} fuzzy_mtime=fuzzy_var;
+               printf \"  %-30s %8d %7d %9d %9d\n\", p, fuzzy_count, fuzzy_work, fuzzy_time, fuzzy_mtime;
             }
          }
       " | sort
@@ -246,7 +271,8 @@ summarize_processlist () {
 format_overall_db_stats () {
    echo
    # We keep counts of everything in an associative array keyed by db name, and
-   # what it is.  The num_dbs counter is to ensure sort order is consistent.
+   # what it is.  The num_dbs counter is to ensure sort order is consistent when
+   # we run the awk commands following this one.
    awk '
       BEGIN {
          num_dbs = 0;
@@ -273,6 +299,9 @@ format_overall_db_stats () {
       /03 CREATE.*03 TRIGGER/ {
          counts[db ",trg"]++;
       }
+      /FOREIGN KEY/ {
+         counts[db ",fk"]++;
+      }
       END {
          mdb = length("Database");
          for ( i=0;i<num_dbs;i++ ) {
@@ -280,11 +309,11 @@ format_overall_db_stats () {
                mdb = length(dbs[i]);
             }
          }
-         fmt = "  %-" mdb "s %6s %5s %3s %5s %5s\n";
-         printf fmt, "Database", "Tables", "Views", "SPs", "Trigs", "Funcs";
+         fmt = "  %-" mdb "s %6s %5s %3s %5s %5s %5s\n";
+         printf fmt, "Database", "Tables", "Views", "SPs", "Trigs", "Funcs", "FKs";
          for ( i=0;i<num_dbs;i++ ) {
             db = dbs[i];
-            printf fmt, db, counts[db ",tables"], counts[db ",views"], counts[db ",sps"], counts[db ",trg"], counts[db ",func"];
+            printf fmt, db, counts[db ",tables"], counts[db ",views"], counts[db ",sps"], counts[db ",trg"], counts[db ",func"], counts[db ",fk"];
          }
       }
    ' /tmp/aspersa-mysqldump > /tmp/aspersa
@@ -332,9 +361,138 @@ format_overall_db_stats () {
          for ( i=0;i<num_dbs;i++ ) {
             db = dbs[i];
             printf fmt, db;
-            for ( j=0;j<num_dbs;j++ ) {
+            for ( j=0;j<num_engines;j++ ) {
                engine = engines[j];
                printf fmts[engine], counts[db "," engine];
+            }
+            print "";
+         }
+      }
+   ' /tmp/aspersa-mysqldump > /tmp/aspersa
+   head -n1 /tmp/aspersa
+   tail -n+2 /tmp/aspersa | sort
+
+   echo
+   # Now do the summary of index types per DB. Careful -- index is a reserved
+   # word in awk.
+   awk '
+      BEGIN {
+         num_dbs   = 0;
+         num_idxes = 0;
+      }
+      /^USE `.*`;$/ {
+         db = substr($2, 2, length($2) - 3);
+         if ( db_seen[db]++ == 0 ) {
+            dbs[num_dbs] = db;
+            num_dbs++;
+         }
+      }
+      /KEY/ {
+         idx="BTREE";
+         if ( $0 ~ /SPATIAL/ ) {
+            idx="SPATIAL";
+         }
+         if ( $0 ~ /FULLTEXT/ ) {
+            idx="FULLTEXT";
+         }
+         if ( $0 ~ /USING RTREE/ ) {
+            idx="RTREE";
+         }
+         if ( $0 ~ /USING HASH/ ) {
+            idx="HASH";
+         }
+         if ( idx_seen[idx]++ == 0 ) {
+            idxes[num_idxes] = idx;
+            num_idxes++;
+         }
+         counts[db "," idx]++;
+      }
+      END {
+         mdb = length("Database");
+         for ( i=0;i<num_dbs;i++ ) {
+            db = dbs[i];
+            if ( length(db) > mdb ) {
+               mdb = length(db);
+            }
+         }
+         fmt = "  %-" mdb "s"
+         printf fmt, "Database";
+         for ( i=0;i<num_idxes;i++ ) {
+            idx = idxes[i];
+            fmts[idx] = " %" length(idx) "s";
+            printf fmts[idx], idx;
+         }
+         print "";
+         for ( i=0;i<num_dbs;i++ ) {
+            db = dbs[i];
+            printf fmt, db;
+            for ( j=0;j<num_idxes;j++ ) {
+               idx = idxes[j];
+               printf fmts[idx], counts[db "," idx];
+            }
+            print "";
+         }
+      }
+   ' /tmp/aspersa-mysqldump > /tmp/aspersa
+   head -n1 /tmp/aspersa
+   tail -n+2 /tmp/aspersa | sort
+
+   echo
+   # Now do the summary of datatypes per DB
+   awk '
+      BEGIN {
+         num_dbs     = 0;
+         num_types = 0;
+      }
+      /^USE `.*`;$/ {
+         db = substr($2, 2, length($2) - 3);
+         if ( db_seen[db]++ == 0 ) {
+            dbs[num_dbs] = db;
+            num_dbs++;
+         }
+      }
+      /^  `/ {
+         str = $0;
+         str = substr(str, index(str, "`") + 1);
+         str = substr(str, index(str, "`") + 2);
+         if ( index(str, " ") > 0 ) {
+            str = substr(str, 1, index(str, " ") - 1);
+         }
+         if ( index(str, ",") > 0 ) {
+            str = substr(str, 1, index(str, ",") - 1);
+         }
+         if ( index(str, "(") > 0 ) {
+            str = substr(str, 1, index(str, "(") - 1);
+         }
+         type = str;
+         if ( type_seen[type]++ == 0 ) {
+            types[num_types] = type;
+            num_types++;
+         }
+         counts[db "," type]++;
+      }
+      END {
+         mdb = length("Database");
+         for ( i=0;i<num_dbs;i++ ) {
+            db = dbs[i];
+            if ( length(db) > mdb ) {
+               mdb = length(db);
+            }
+         }
+         fmt = "  %-" mdb "s"
+         printf fmt, "Database";
+         for ( i=0;i<num_types;i++ ) {
+            type = types[i];
+            fmts[type] = " %" length(type) "s";
+            printf fmts[type], type;
+         }
+         print "";
+         for ( i=0;i<num_dbs;i++ ) {
+            db = dbs[i];
+            printf fmt, db;
+            for ( j=0;j<num_types;j++ ) {
+               type = types[j];
+               printf fmts[type], counts[db "," type];
             }
             print "";
          }
@@ -461,13 +619,18 @@ main () {
    # Schema, databases, data type, other analysis.
    # ########################################################################
    section Schema
-   # Assume "yes" if stdin or stdout is not a terminal, so this can be run and
+   # Assume "no" if stdin or stdout is not a terminal, so this can be run and
    # put into a file, or piped into a pager, or something else like that.
+
+   # Default to 'yes' when working interactively.
    if [ -t 0 -a -t 1 ]; then
       echo -n "Would you like to mysqldump -d the schema and analyze it? [Y]/n "
       read reply
+      reply=${reply:-y}
    fi
-   if echo "${reply:-y}" | grep -i '^y' > /dev/null ; then
+
+   # Default to 'no' when not working interactively.
+   if echo "${reply:-n}" | grep -i '^y' > /dev/null ; then
       mysqldump --all-databases --no-data --skip-comments \
          --skip-add-locks --skip-add-drop-table --compact \
          --skip-lock-all-tables --skip-lock-tables --skip-set-charset \
@@ -480,9 +643,6 @@ main () {
    else
       echo "Skipping schema analysis"
    fi
-
-   # TODO  show data types in use, and a count(*) of the number of columns
-   # Table of index types, ignoring mysql db
 
    # ########################################################################
    # Noteworthy Technologies
@@ -498,6 +658,11 @@ main () {
          name_val "Geospatial Types" Yes
       else
          name_val "Geospatial Types" No
+      fi
+      if grep 'FOREIGN KEY' /tmp/aspersa-mysqldump > /dev/null; then
+         name_val "Foreign Keys" Yes
+      else
+         name_val "Foreign Keys" No
       fi
    fi
    if [ "$(get_stat Ssl_accepts)" -gt 0 ]; then
@@ -584,7 +749,6 @@ main () {
 
    # ########################################################################
    # MyISAM
-   # TODO: skip if there aren't any non-mysql tables in use?
    # ########################################################################
    section MyISAM
    buf_size=$(get_var key_buffer_size)
