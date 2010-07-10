@@ -544,16 +544,18 @@ main () {
    # ########################################################################
    # Fetch some basic info so we can start
    # ########################################################################
-   mysql -ss -e 'SHOW /*!40100 GLOBAL*/ VARIABLES' $* > /tmp/aspersa-mysql-variables
+   mysql -ss -e 'SHOW GRANTS' > /tmp/aspersa
    if [ "$?" != "0" ]; then
       echo "Cannot connect to mysql, please specify command-line options."
       temp_files "rm"
       exit 1
    fi
+   user="$(sed -e 's/^.*TO //; q' /tmp/aspersa)";
+   mysql -ss -e 'SHOW /*!40100 GLOBAL*/ VARIABLES' $* > /tmp/aspersa-mysql-variables
    mysql -ss -e 'SHOW /*!50000 GLOBAL*/ STATUS' $* > /tmp/aspersa-mysql-status
-   mysql -ss -e 'SHOW DATABASES' $* > /tmp/aspersa-mysql-databases
-   mysql -ssE -e 'SHOW SLAVE STATUS' $* > /tmp/aspersa-mysql-slave
-   mysql -ssE -e 'SHOW FULL PROCESSLIST' $* > /tmp/aspersa-mysql-processlist
+   mysql -ss -e 'SHOW DATABASES' $* > /tmp/aspersa-mysql-databases 2>/dev/null
+   mysql -ssE -e 'SHOW SLAVE STATUS' $* > /tmp/aspersa-mysql-slave 2>/dev/null
+   mysql -ssE -e 'SHOW FULL PROCESSLIST' $* > /tmp/aspersa-mysql-processlist 2>/dev/null
    now="$(mysql -ss -e 'SELECT NOW()' $*)"
    port="$(get_var port)"
 
@@ -561,6 +563,7 @@ main () {
    # General date, hostname, etc
    # ########################################################################
    section "Report_On_Port_${port}"
+   name_val User "${user}"
    name_val Time "${now} ($(get_mysql_timezone))"
    name_val Hostname "$(get_var hostname)"
    get_mysql_version
@@ -780,7 +783,7 @@ main () {
    # ########################################################################
    section Security
    users="$(mysql -ss \
-      -e 'SELECT COUNT(*), SUM(user=""), SUM(password=""), SUM(password NOT LIKE "*%") FROM mysql.user' $* \
+      -e 'SELECT COUNT(*), SUM(user=""), SUM(password=""), SUM(password NOT LIKE "*%") FROM mysql.user' $* 2>/dev/null \
       | awk '{printf "%d users, %d anon, %d w/o pw, %d old pw\n", $1, $2, $3, $4}')"
    name_val Users "${users}"
    name_val "Old Passwords" $(get_var old_passwords)
@@ -791,14 +794,14 @@ main () {
    section Binary_Logging
    binlog=$(get_var log_bin)
    if [ "${binlog}" ]; then
-      mysql -ss -e 'SHOW MASTER LOGS' $* > /tmp/aspersa
+      mysql -ss -e 'SHOW MASTER LOGS' $* > /tmp/aspersa 2>/dev/null
       summarize_binlogs
       format="$(get_var binlog_format)"
       name_val binlog_format "${format:-STATEMENT}"
       name_val expire_logs_days $(get_var expire_logs_days)
       name_val sync_binlog $(get_var sync_binlog)
       name_val server_id $(get_var server_id)
-      mysql -ss -e 'SHOW MASTER STATUS' $* > /tmp/aspersa
+      mysql -ss -e 'SHOW MASTER STATUS' $* > /tmp/aspersa 2>/dev/null
       format_binlog_filters
    fi
 
@@ -821,6 +824,11 @@ main () {
    do
       name_val ${v} $(shorten $(get_var ${v}))
    done
+   for v in log log_error log_warnings log_slow_queries \
+         log_queries_not_using_indexes log_slave_updates;
+   do
+      name_val ${v} $(get_var ${v})
+   done
 
    # ########################################################################
    # If there is a my.cnf in a standard location, see if we can pretty-print it.
@@ -834,6 +842,8 @@ main () {
       name_val "Config File" "${cnf_file}"
       cat "${cnf_file}" > /tmp/aspersa
       pretty_print_cnf_file
+   else
+      name_val "Config File" "Not found"
    fi
 
    temp_files "rm"
