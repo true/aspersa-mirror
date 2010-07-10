@@ -265,6 +265,19 @@ summarize_processlist () {
    echo
 }
 
+# Pretty-prints the my.cnf file.
+pretty_print_cnf_file () {
+   awk '/^[a-zA-Z[]/ {
+      if ($0 ~ /=/) {
+         fields=split($0, arr, "[[:space:]]*=[[:space:]]*");
+         printf("%-35s = %s\n", arr[1], arr[2]);
+      }
+      else {
+         print $1;
+      }
+   }' /tmp/aspersa
+}
+
 # Summarizes per-database statistics for a bunch of different things: count of
 # tables, views, etc.  Data should be in /tmp/aspersa-mysqldump and /tmp/aspersa
 # gets overwritten.
@@ -808,6 +821,20 @@ main () {
    do
       name_val ${v} $(shorten $(get_var ${v}))
    done
+
+   # ########################################################################
+   # If there is a my.cnf in a standard location, see if we can pretty-print it.
+   # ########################################################################
+   section Configuration_File
+   cnf_file='/etc/my.cnf'
+   if [ ! -e "${cnf_file}" ]; then
+      cnf_file="/etc/mysql/my.cnf";
+   fi
+   if [ -e "${cnf_file}" ]; then
+      name_val "Config File" "${cnf_file}"
+      cat "${cnf_file}" > /tmp/aspersa
+      pretty_print_cnf_file
+   fi
 
    temp_files "rm"
 }
