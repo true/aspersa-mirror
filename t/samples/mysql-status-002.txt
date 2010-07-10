@@ -1,4 +1,4 @@
-Aborted_clients	0
+Aborted_clients	1
 Aborted_connects	0
 Binlog_cache_disk_use	0
 Binlog_cache_use	0
@@ -240,14 +240,14 @@ Ssl_used_session_cache_entries	0
 Ssl_verify_depth	0
 Ssl_verify_mode	0
 Ssl_version	
-Table_locks_immediate	4313
-Table_locks_waited	1
-Tc_log_max_pages_used	0
+Table_locks_immediate	94314
+Table_locks_waited	10
+Tc_log_max_pages_used	53
 Tc_log_page_size	0
 Tc_log_page_waits	0
 Threads_cached	3
 Threads_connected	1
 Threads_created	4
 Threads_running	1
-Uptime	7732
+Uptime	7737
 Uptime_since_flush_status	7732

@@ -208,6 +208,53 @@ format_binlog_filters () {
    name_val "binlog_ignore_db" $(cut -f4 /tmp/aspersa)
 }
 
+# Takes as input a file that has two samples of SHOW STATUS, columnized next to
+# each other.  These should be in /tmp/aspersa.  Outputs fuzzy-ed numbers:
+# absolute, all-time per second, and per-second over the interval between the
+# samples.  Omits any rows that are all zeroes.
+format_status_variables () {
+   # First, figure out the intervals.
+   utime1=$(awk '/Uptime /{print $2}' /tmp/aspersa);
+   utime2=$(awk '/Uptime /{print $3}' /tmp/aspersa);
+   awk "
+   BEGIN {
+      utime1 = ${utime1};
+      utime2 = ${utime2};
+      udays  = utime1 / 86400;
+      udiff  = utime2 - utime1;
+      format=\"%-35s %11s %11s %11s\\n\";
+      printf(format, \"Variable\", \"Per day\", \"Per second\", udiff \" secs\");
+   }
+   \$2 ~ /^[0-9]*\$/ {
+      if ( \$2 > 0 && \$2 < 18446744073709551615 ) {
+         if ( udays > 0 ) {
+            fuzzy_var=\$2 / udays;
+            ${fuzzy_formula};
+            perday=fuzzy_var;
+         }
+         if ( utime1 > 0 ) {
+            fuzzy_var=\$2 / utime1;
+            ${fuzzy_formula};
+            persec=fuzzy_var;
+         }
+         if ( udiff > 0 ) {
+            fuzzy_var=(\$3 - \$2) / udiff;
+            ${fuzzy_formula};
+            nowsec=fuzzy_var;
+         }
+         perday = int(perday);
+         persec = int(persec);
+         nowsec = int(nowsec);
+         if ( perday + persec + nowsec > 0 ) {
+            if ( perday == 0 ) { perday = \"\"; }
+            if ( persec == 0 ) { persec = \"\"; }
+            if ( nowsec == 0 ) { nowsec = \"\"; }
+            printf(format, \$1, perday, persec, nowsec);
+         }
+      }
+   }" /tmp/aspersa
+}
+
 # Slices the processlist a bunch of different ways.  Uses input from
 # /tmp/aspersa-mysql-processlist.  The processlist should be created with the \G
 # flag so it's vertical.  The parsing is a bit awkward because different
@@ -265,7 +312,7 @@ summarize_processlist () {
    echo
 }
 
-# Pretty-prints the my.cnf file.
+# Pretty-prints the my.cnf file, which should be in /tmp/aspersa.
 pretty_print_cnf_file () {
    awk '/^[a-zA-Z[]/ {
       if ($0 ~ /=/) {
@@ -591,6 +638,11 @@ main () {
    # ########################################################################
    # Queries and query plans
    # ########################################################################
+   section "Status_Variables_(Wait_10_Seconds)"
+   sleep 10
+   mysql -ss -e 'SHOW /*!50000 GLOBAL*/ STATUS' $* \
+      | join /tmp/aspersa-mysql-status - > /tmp/aspersa 
+   format_status_variables
 
    # TODO
    # Status: all time & last 10 seconds
@@ -616,8 +668,6 @@ main () {
    open_tables=$(get_stat Open_tables)
    name_val Usage  "$(fuzzy_pct ${open_tables} ${table_cache})"
 
-   #  TODO: tables opened per second
-
    # ########################################################################
    # Query cache
    # ########################################################################
@@ -628,7 +678,6 @@ main () {
       name_val Size "$(shorten ${query_cache_size} 1)"
       used=$(( ${query_cache_size} - $(get_stat Qcache_free_memory) ))
       name_val Usage "$(fuzzy_pct ${used} ${query_cache_size})"
-      #  TODO hit/select, insert/hit ratio
    fi
 
    # ########################################################################
