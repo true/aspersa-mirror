@@ -36,6 +36,8 @@ LEN=30
    mysql -e 'SHOW FULL PROCESSLIST\G' >> $DEST/$d-processlist1  2>&1 &
 
    # Next, start oprofile gathering data during the whole rest of this process.
+   # The --init should be a no-op if it has already been init-ed.
+   opcontrol --init
    opcontrol --start --no-vmlinux
 
    # Grab a few general things first.  Background all of these so we can start them
@@ -59,14 +61,18 @@ LEN=30
       sleep 1;
    done
 
-   opcontrol --flush;
-   opcontrol --save=$d;
    opcontrol --stop;
+   opcontrol --dump;
+   kill $(pidof oprofiled) 2>/dev/null;
+   opcontrol --save=$d;
+   echo "oprofile data saved to $d; you should now be able to get a  report"
+   echo "by running something like"
+   echo "opreport --demangle=smart --symbols --merge tgid session:$d <binary>"
 
    mysql -e 'SHOW INNODB STATUS\G'    >> $DEST/$d-innodbstatus2 2>&1 &
    mysql -e 'SHOW FULL PROCESSLIST\G' >> $DEST/$d-processlist2  2>&1 &
 
    # mysqladmin in 5.1 has a bunch of obnoxious bugs.  Among them, -c does not
    # work, so it will continue forever unless we kill it.
-   kill $mysqladmin_pid;
+   kill $mysqladmin_pid 2>/dev/null;
 )200>/tmp/aspersa-collect-lockfile
