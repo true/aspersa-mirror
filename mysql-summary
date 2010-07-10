@@ -597,7 +597,7 @@ main () {
       temp_files "rm"
       exit 1
    fi
-   user="$(sed -e 's/^.*TO //; q' /tmp/aspersa)";
+   user="$(sed -e 's/^.*TO //; s/ .*//g; q' /tmp/aspersa)";
    mysql -ss -e 'SHOW /*!40100 GLOBAL*/ VARIABLES' $* > /tmp/aspersa-mysql-variables
    mysql -ss -e 'SHOW /*!50000 GLOBAL*/ STATUS' $* > /tmp/aspersa-mysql-status
    mysql -ss -e 'SHOW DATABASES' $* > /tmp/aspersa-mysql-databases 2>/dev/null
