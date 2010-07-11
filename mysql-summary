@@ -50,7 +50,7 @@ fuzzy_formula='
 # symlink them to /etc/passwd and then run this program as root.  Call this
 # function with "check", "rm", or "touch" as an argument.
 temp_files() {
-   for file in /tmp/aspersa{,-mysql-variables,-mysql-status} \
+   for file in /tmp/aspersa{,-mysql-variables,-mysql-status,-innodb-status} \
          /tmp/aspersa{,-mysql-databases,-mysql-processlist} \
          /tmp/aspersa-mysql{dump,-slave};
    do
@@ -323,6 +323,27 @@ pretty_print_cnf_file () {
          print $1;
       }
    }' /tmp/aspersa
+}
+
+# Summarizes various things about InnoDB status that are not easy to see by eye.
+# Input file is /tmp/aspersa-innodb-status.
+format_innodb_status () {
+   oldest=$(sed -n -e '/^---TRANSACTION.*[0-9] sec,/{s/^.* \([0-9]*\) sec.*$/\1/; p}' \
+      /tmp/aspersa-innodb-status | sort -rn | head -n1);
+   echo "Oldest Transaction ${oldest} Seconds"
+   echo "Transaction States"
+   awk -F, '/^---TRANSACTION/{print $2}' /tmp/aspersa-innodb-status \
+      | sed -e 's/ [0-9]* sec.*//' | sort | uniq -c | sort -rn
+   echo "Tables Locked"
+   awk '/^TABLE LOCK table/{print $4}' /tmp/aspersa-innodb-status \
+      | sort | uniq -c | sort -rn
+   echo "Semaphore Waits"
+   grep 'has waited at' /tmp/aspersa-innodb-status | cut -d' ' -f6-8 | sort \
+      | uniq -c | sort -rn
+   echo "Semaphore Holders"
+   awk '/has reserved it in mode/{
+      print substr($0, 1 + index($0, "("), index($0, ")") - index($0, "(") - 1);
+   }' /tmp/aspersa-innodb-status | sort | uniq -c | sort -rn
 }
 
 # Summarizes per-database statistics for a bunch of different things: count of
@@ -602,6 +623,7 @@ main () {
    mysql -ss -e 'SHOW /*!50000 GLOBAL*/ STATUS' $* > /tmp/aspersa-mysql-status
    mysql -ss -e 'SHOW DATABASES' $* > /tmp/aspersa-mysql-databases 2>/dev/null
    mysql -ssE -e 'SHOW SLAVE STATUS' $* > /tmp/aspersa-mysql-slave 2>/dev/null
+   mysql -ssE -e 'SHOW /*!50000 ENGINE*/ INNODB STATUS' $* > /tmp/aspersa-innodb-status 2>/dev/null
    mysql -ssE -e 'SHOW FULL PROCESSLIST' $* > /tmp/aspersa-mysql-processlist 2>/dev/null
    now="$(mysql -ss -e 'SELECT NOW()' $*)"
    port="$(get_var port)"
@@ -643,18 +665,6 @@ main () {
    mysql -ss -e 'SHOW /*!50000 GLOBAL*/ STATUS' $* \
       | join /tmp/aspersa-mysql-status - > /tmp/aspersa 
    format_status_variables
-
-   # TODO
-   # Status: all time & last 10 seconds
-   #  -  QPS, bytes/sec, queries that do a sort per second, number that do a
-   #     temp table per second, temp table on disk per second
-   #  -  temp tables & files
-   #  -  read/write ratio
-   #  -  Select_* types
-   #  -  top 5 Com, then "others"
-   #  -  connections, threads, cached threads, aborted, max_connections,
-   #     max_used
-   #  -  Handler operations
 
    # ########################################################################
    # Table cache
@@ -802,14 +812,9 @@ main () {
       name_val "Commit Concurrency"  $(get_var innodb_commit_concurrency)
       name_val "Txn Isolation Level" $(get_var tx_isolation)
 
-      # TODO InnoDB: log write rate,
-      #   ratio of row and page read/write/etc, #trx, longest trx, #lock waits,
-      #   #semaphore/mutex waits, purge lag, history list length, #purge thread
-      #   main thread state, pending io, checkpoint lag, queries in queue
-      #   include checkpoint age (converted to kb/mb/gb), history list len, age
-      #   of oldest open trx, # read views open, # open trx, and # of pending
-      #   IO.  Measuring semaphore waits would be handy too.
-
+      if [ -s /tmp/aspersa-innodb-status ]; then
+         format_innodb_status
+      fi
    fi
 
    # ########################################################################

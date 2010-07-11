@@ -1,0 +1,35 @@
+#!/bin/bash
+#format_innodb_status
+
+cat <<EOF > $1
+Oldest Transaction 3 Seconds
+Transaction States
+      1  ACTIVE
+Tables Locked
+Semaphore Waits
+     69 btr/btr0cur.c line 457
+     47 btr/btr0cur.c line 523
+     17 trx/trx0trx.c line 1621
+     12 row/row0sel.c line 3549
+      4 lock/lock0lock.c line 4944
+      3 lock/lock0lock.c line 5316
+      2 lock/lock0lock.c line 3224
+      2 btr/btr0sea.c line 1032
+      1 trx/trx0trx.c line 738
+      1 row/row0sel.c line 4574
+      1 lock/lock0lock.c line 5163
+      1 lock/lock0lock.c line 3249
+      1 ./include/btr0btr.ic line 53
+      1 fsp/fsp0fsp.c line 3395
+      1 btr/btr0cur.c line 672
+      1 btr/btr0cur.c line 450
+Semaphore Holders
+     66 thread id 139960165583184
+     45 thread id 139960567171408
+      4 thread id 139960404199760
+      1 thread id 139961215367504
+      1 thread id 139960969292112
+      1 thread id 139960676096336
+EOF
+
+cp samples/innodb-status.001.txt /tmp/aspersa-innodb-status

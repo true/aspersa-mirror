@@ -1,0 +1,26 @@
+#!/bin/bash
+#format_innodb_status
+
+cat <<'EOF' > $1
+Oldest Transaction 4 Seconds
+Transaction States
+     70  ACTIVE (PREPARED)
+      1  ACTIVE
+Tables Locked
+     62 `citydb`.`player_buildings`
+     46 `citydb`.`players`
+     22 `citydb`.`city_grid`
+     17 `citydb`.`player_stats`
+      6 `citydb`.`player_contracts`
+      1 `citydb`.`player_achievements`
+Semaphore Waits
+     23 trx/trx0undo.c line 1796
+     10 trx/trx0trx.c line 1888
+      8 trx/trx0trx.c line 1033
+      7 trx/trx0trx.c line 738
+      1 lock/lock0lock.c line 3770
+      1 ./include/log0log.ic line 322
+Semaphore Holders
+EOF
+
+cp samples/innodb-status.002.txt /tmp/aspersa-innodb-status
