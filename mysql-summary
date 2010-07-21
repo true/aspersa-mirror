@@ -383,6 +383,9 @@ format_overall_db_stats () {
       /FOREIGN KEY/ {
          counts[db ",fk"]++;
       }
+      /PARTITION BY/ {
+         counts[db ",partn"]++;
+      }
       END {
          mdb = length("Database");
          for ( i=0;i<num_dbs;i++ ) {
@@ -390,11 +393,11 @@ format_overall_db_stats () {
                mdb = length(dbs[i]);
             }
          }
-         fmt = "  %-" mdb "s %6s %5s %3s %5s %5s %5s\n";
-         printf fmt, "Database", "Tables", "Views", "SPs", "Trigs", "Funcs", "FKs";
+         fmt = "  %-" mdb "s %6s %5s %3s %5s %5s %5s %5s\n";
+         printf fmt, "Database", "Tables", "Views", "SPs", "Trigs", "Funcs", "FKs", "Partn";
          for ( i=0;i<num_dbs;i++ ) {
             db = dbs[i];
-            printf fmt, db, counts[db ",tables"], counts[db ",views"], counts[db ",sps"], counts[db ",trg"], counts[db ",func"], counts[db ",fk"];
+            printf fmt, db, counts[db ",tables"], counts[db ",views"], counts[db ",sps"], counts[db ",trg"], counts[db ",func"], counts[db ",fk"], counts[db ",partn"];
          }
       }
    ' /tmp/aspersa-mysqldump > /tmp/aspersa
@@ -696,15 +699,11 @@ main () {
    section Schema
    # Assume "no" if stdin or stdout is not a terminal, so this can be run and
    # put into a file, or piped into a pager, or something else like that.
-
-   # Default to 'yes' when working interactively.
    if [ -t 0 -a -t 1 ]; then
-      echo -n "Would you like to mysqldump -d the schema and analyze it? [Y]/n "
+      echo -n "Would you like to mysqldump -d the schema and analyze it? y/n "
       read reply
-      reply=${reply:-y}
+      reply=${reply:-n}
    fi
-
-   # Default to 'no' when not working interactively.
    if echo "${reply:-n}" | grep -i '^y' > /dev/null ; then
       mysqldump --all-databases --no-data --skip-comments \
          --skip-add-locks --skip-add-drop-table --compact \
