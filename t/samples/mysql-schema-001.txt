@@ -785,3 +785,7 @@ USE `sakila`;
 /*!50001 CREATE ALGORITHM=UNDEFINED */
 /*!50013 DEFINER=`msandbox`@`%` SQL SECURITY DEFINER */
 /*!50001 VIEW `staff_list` AS select `s`.`staff_id` AS `ID`,concat(`s`.`first_name`,_utf8' ',`s`.`last_name`) AS `name`,`a`.`address` AS `address`,`a`.`postal_code` AS `zip code`,`a`.`phone` AS `phone`,`city`.`city` AS `city`,`country`.`country` AS `country`,`s`.`store_id` AS `SID` from (((`staff` `s` join `address` `a` on((`s`.`address_id` = `a`.`address_id`))) join `city` on((`a`.`city_id` = `city`.`city_id`))) join `country` on((`city`.`country_id` = `country`.`country_id`))) */;
+
+CREATE TABLE `t1` (
+  `d` int DEFAULT NULL
+) ENGINE=MyISAM DEFAULT CHARSET=latin1 /*!50100 PARTITION BY RANGE (to_days(d)) (PARTITION p001 VALUES LESS THAN (730851) ENGINE = MyISAM, PARTITION p002 VALUES LESS THAN (730882) ENGINE = MyISAM, PARTITION p003 VALUES LESS THAN (730910) ENGINE = MyISAM) */
