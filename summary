@@ -619,10 +619,10 @@ parse_lsi_megaraid_virtual_devices () {
 format_vmstat () {
    awk '
       /procs/ {
-         print  "  procs  ---swap-- -----io---- ---system---- -----cpu------";
+         print  "  procs  ---swap-- -----io---- ---system---- --------cpu--------";
       }
       $0 !~ /procs/ {
-         printf "  %2s %2s  %4s %4s %5s %5s %6s %6s %2s %2s %2s %2s %2s\n",
+         printf "  %2s %2s  %4s %4s %5s %5s %6s %6s %3s %3s %3s %3s %3s\n",
             $1, $2, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17;
       }
    ' /tmp/aspersa
@@ -812,7 +812,7 @@ main () {
    fi
 
    if [ "${notfound}" ]; then
-      echo "   Raid controller not found; try getting it from"
+      echo "   RAID controller software not found; try getting it from"
       echo "   ${notfound}"
    fi
 
